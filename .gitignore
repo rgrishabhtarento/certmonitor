@@ -37,3 +37,7 @@ Thumbs.db
 # Local artefacts
 docker-compose.override.yml
 backups/
+
+# Locally generated data (import sheets, exports). Keeps internal
+# hostnames and infrastructure topology out of a public repository.
+local-data/
