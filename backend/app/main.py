@@ -95,13 +95,20 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
         # Probes are polled constantly; logging them would drown the signal.
         if request.url.path not in ("/health", "/ready", "/live", "/metrics"):
-            user = getattr(request.state, "user", None)
-            logger.info(
-                "request",
-                status_code=response.status_code,
-                duration_ms=round(duration_ms, 2),
-                user=getattr(user, "username", None),
-            )
+            # Read the plain username snapshot, never the ORM instance. This
+            # middleware runs outside the request-scoped session, so touching
+            # a User attribute here raises DetachedInstanceError - which used
+            # to turn a perfectly good response into a 500.
+            try:
+                logger.info(
+                    "request",
+                    status_code=response.status_code,
+                    duration_ms=round(duration_ms, 2),
+                    user=getattr(request.state, "username", None),
+                    role=getattr(request.state, "role", None),
+                )
+            except Exception:  # pragma: no cover - logging must never 500
+                pass
         return response
 
 

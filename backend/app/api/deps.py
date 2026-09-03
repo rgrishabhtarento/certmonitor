@@ -83,6 +83,13 @@ async def get_current_user(
         )
 
     request.state.user = user
+    # Snapshot the identity as plain strings. Middleware runs outside the
+    # request-scoped session, so reading an attribute off the ORM instance
+    # there hits a detached object and raises DetachedInstanceError. These
+    # are what the access log and any other outer layer should use.
+    request.state.username = user.username
+    request.state.user_id = str(user.id)
+    request.state.role = user.role_name
     return user
 
 
