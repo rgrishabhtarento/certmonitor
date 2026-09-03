@@ -12,6 +12,7 @@ from app.models.change import (
     ChangeComment,
     change_endpoints,
 )
+from app.models.diagnosis import Diagnosis
 from app.models.endpoint import Endpoint, Environment, Tag, endpoint_tags
 from app.models.incident import Incident
 from app.models.monitoring import MonitoringResult, SslCertificate, WorkerHeartbeat
@@ -25,6 +26,7 @@ __all__ = [
     "Change",
     "ChangeActivity",
     "ChangeComment",
+    "Diagnosis",
     "Endpoint",
     "Environment",
     "Incident",

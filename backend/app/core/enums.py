@@ -262,3 +262,79 @@ class ChangeAction(StrEnum):
     HEALTH_CHECK = "health_check"
     CANCELLED = "cancelled"
     COMMENTED = "commented"
+
+
+# ------------------------------------------------------- diagnostics
+class DiagnosisSeverity(StrEnum):
+    """How much attention this endpoint's state deserves right now.
+
+    Wider than the alert `Severity` on purpose: an alert only has to decide
+    whether to wake someone, whereas a diagnosis has to rank a queue of
+    endpoints an engineer is working through.
+    """
+
+    INFO = "info"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+DIAGNOSIS_SEVERITY_ORDER: dict[str, int] = {
+    DiagnosisSeverity.INFO: 0,
+    DiagnosisSeverity.LOW: 1,
+    DiagnosisSeverity.MEDIUM: 2,
+    DiagnosisSeverity.HIGH: 3,
+    DiagnosisSeverity.CRITICAL: 4,
+}
+
+
+class Confidence(StrEnum):
+    """How well the evidence supports a conclusion.
+
+    Deliberately three coarse bands. A precise-looking percentage on a
+    handful of heuristics would imply a rigour that is not there.
+    """
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class EvidenceKind(StrEnum):
+    """Where a statement came from - the guard against inventing facts.
+
+    OBSERVED is something this diagnosis actually measured or read from the
+    database. INFERRED is a conclusion drawn from observations. UNKNOWN is a
+    thing that matters but that CertMonitor cannot see from where it runs,
+    and is stated as such rather than guessed at.
+    """
+
+    OBSERVED = "observed"
+    INFERRED = "inferred"
+    UNKNOWN = "unknown"
+
+
+class ActionRisk(StrEnum):
+    """How dangerous a recommended action is in production.
+
+    SAFE is read-only. DISRUPTIVE interrupts service briefly. HIGH_RISK can
+    lose data or take an application down; nothing in that band is ever
+    executed by CertMonitor, only described.
+    """
+
+    SAFE = "safe"
+    DISRUPTIVE = "disruptive"
+    HIGH_RISK = "high_risk"
+
+
+class DiagnosisFocus(StrEnum):
+    """Which question the operator is asking."""
+
+    AUTO = "auto"
+    ENDPOINT = "endpoint"
+    SSL = "ssl"
+    AVAILABILITY = "availability"
+    PERFORMANCE = "performance"
+    RECENT_FAILURE = "recent_failure"
+    DEPLOYMENT_IMPACT = "deployment_impact"

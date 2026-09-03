@@ -9,6 +9,10 @@ e-mail. Everything on the dashboard comes from checks the monitoring worker
 actually executed — there is no mock or seeded monitoring data anywhere in the
 application.
 
+Its [Diagnose](#15-diagnose) feature investigates a failing endpoint layer by
+layer, ranks the probable causes against the evidence behind each, correlates
+with recent deployments and incidents, and says plainly what it cannot see.
+
 It also carries a deliberately small [change management](#14-change-management)
 workflow — request, approve, deploy — whose point is that starting a deployment
 **pauses the monitoring for exactly the endpoints it touches**, so a planned
@@ -39,15 +43,16 @@ Then open <http://localhost:8080> and sign in.
 12. [Alerts and notifications](#12-alerts-and-notifications)
 13. [User management and RBAC](#13-user-management-and-rbac)
 14. [Change management](#14-change-management)
-15. [API reference](#15-api-reference)
-16. [Local development](#16-local-development)
-17. [Testing](#17-testing)
-18. [Backup and recovery](#18-backup-and-recovery)
-19. [Production deployment](#19-production-deployment)
-20. [Kubernetes considerations](#20-kubernetes-considerations)
-21. [Troubleshooting](#21-troubleshooting)
-22. [Security notes](#22-security-notes)
-23. [Project structure](#23-project-structure)
+15. [Diagnose](#15-diagnose)
+16. [API reference](#16-api-reference)
+17. [Local development](#17-local-development)
+18. [Testing](#18-testing)
+19. [Backup and recovery](#19-backup-and-recovery)
+20. [Production deployment](#20-production-deployment)
+21. [Kubernetes considerations](#21-kubernetes-considerations)
+22. [Troubleshooting](#22-troubleshooting)
+23. [Security notes](#23-security-notes)
+24. [Project structure](#24-project-structure)
 
 ---
 
@@ -260,7 +265,7 @@ docker compose exec backend alembic downgrade -1
 `endpoint_tags`, `tags`, `environments`, `monitoring_results`,
 `ssl_certificates`, `incidents`, `alerts`, `notification_channels`,
 `audit_logs`, `system_settings`, `worker_heartbeats`, `changes`,
-`change_endpoints`, `change_comments`, `change_activity`.
+`change_endpoints`, `change_comments`, `change_activity`, `diagnoses`.
 
 Indexes worth knowing about:
 
@@ -804,7 +809,171 @@ UI never re-derives the workflow rules and cannot drift from the API.
 
 ---
 
-## 15. API reference
+## 15. Diagnose
+
+A red dashboard tells you *that* something is broken. **Diagnose** is the part
+that tells you which layer, why we think so, what changed, what to do, and how
+to know it worked — the sequence a senior engineer runs through, made explicit.
+
+Open it from any endpoint's detail page.
+
+### It investigates from the outside in
+
+```
+DNS → TCP (per resolved address) → TLS → HTTP
+```
+
+Each stage is probed separately, so the fault is localised before a word of
+prose is read. "TLS fine, HTTP 502" is a completely different problem from "TCP
+refused", even though both show as DOWN on the dashboard. The report names the
+deepest layer that still worked.
+
+Then it reasons over everything else the platform already knows: the endpoint's
+own history, its open incident, deployments from Change Management, how the
+rest of its application is doing, sibling endpoints on the same host, and every
+previous diagnosis of this endpoint.
+
+### It ranks causes rather than asserting one
+
+A 502 four minutes after a production release has an obvious leading
+explanation and two plausible others. Presenting only the leader hides the fact
+that it might be wrong, so every candidate is listed with the evidence that
+scored it:
+
+```
+Most likely   The reverse proxy cannot reach its upstream        62% of evidence
+              • HTTP 502 returned by the edge
+              • TLS terminated cleanly, so the edge is serving normally
+
+Possible      The CHG-2026-0018 deployment                       28% of evidence
+              • completed 4 minutes before the failure started
+
+Less likely   Resource saturation                                10% of evidence
+```
+
+The percentage is a share of accumulated evidence weight, and is labelled as
+that — not as a probability. An engineer who disagrees can see exactly which
+signal to challenge.
+
+### Confidence is computed, not asserted
+
+**High** requires both more than one independent signal *and* a clear margin
+over the runner-up. A single observation with nothing contradicting it is
+**Medium** — one probe can mislead, and sounding certain on the strength of it
+is the failure mode that costs an hour. Two explanations fitting equally well
+lowers confidence rather than picking one.
+
+### It never invents infrastructure
+
+This is the rule that matters most. CertMonitor watches an endpoint from the
+outside; it has no view of pods, containers, CPU, memory or databases. So it
+says so, in a **Not observable** section as prominent as the evidence:
+
+| | |
+|---|---|
+| Container / pod state | Not visible from CertMonitor |
+| Host resources | Not visible from CertMonitor |
+| Application logs | Not visible from CertMonitor |
+| Upstream dependencies | Not modelled |
+
+Every statement in the report is tagged **Observed**, **Inferred** or **Not
+checked**. A tool with no cluster access reporting "Pod is CrashLoopBackOff" is
+a guess wearing a fact's clothing, and an engineer who trusts it loses an hour.
+`kubectl` and `docker` commands are still suggested where they would help — but
+prefixed `IF this runs on Kubernetes`, as suggestions rather than observations.
+
+### Actions are ordered by risk, and it never runs them
+
+Safest first, so someone who stops after step two has still done the sensible
+thing. Each carries its blast radius:
+
+| Band | Meaning |
+|---|---|
+| **Safe** | Read-only. Checking logs, status, certificates, resource usage. |
+| **Disruptive** | Briefly interrupts service. Restarting, reloading, scaling. |
+| **High risk** | Can cause an outage or lose data. Rollback, deleting resources, firewall changes. |
+
+Nothing is ever executed automatically, and high-risk steps say so explicitly.
+Where a rollback is the leading hypothesis, the advice is still to read the
+logs first — rolling back on timing alone discards the evidence of what
+actually broke.
+
+### It detects what a single probe cannot
+
+- **Intermittent failure.** A ✓/✗ strip of the last 30 checks with an
+  availability figure. An endpoint that passes right now but failed 9 of the
+  last 30 is not healthy, and a naive check would have said it was.
+- **Performance degradation.** Current response time against the endpoint's own
+  24-hour median, excluding the most recent checks so present slowness cannot
+  hide inside its own baseline. Still HTTP 200, 12x slower, is worth knowing.
+- **Recurrence.** How many times this same verdict has come back in 30 days,
+  with whatever resolution was recorded last time shown verbatim.
+- **Blast radius.** Whether every endpoint of the application is down (an
+  outage) or just this one (a fault) — which changes the severity.
+
+### Severity
+
+`INFO` · `LOW` · `MEDIUM` · `HIGH` · `CRITICAL`, computed from the verdict, the
+environment, blast radius, availability and certificate expiry. Production
+weighs heavily: the same 502 is a different problem in staging than on the host
+customers are using. Intermittent failure is deliberately rated High — it is
+harder to catch than a clean outage and usually ignored until it becomes one.
+
+### Deployment awareness
+
+If a deployment is **in progress**, Diagnose says so and stops. Monitoring is
+paused, the state is expected, and there is nothing to diagnose — no false
+incident, no wasted investigation.
+
+If one **completed recently**, the gap between it finishing and the failure
+starting is measured and weighted: under 10 minutes is strong evidence, up to
+30 moderate, up to 90 circumstantial. The wording is always *correlation*,
+never causation.
+
+### Verification, and the loop
+
+Every diagnosis ends with concrete success criteria — expected status, the
+numeric latency target from the endpoint's own baseline, the open incident
+closing, and *N* consecutive passing checks rather than one. **Re-diagnose**
+then runs it again and shows the before/after:
+
+```
+BEFORE   HTTP 502, 2.8s      →   NOW   HTTP 200, 210ms
+                                       Issue appears resolved
+```
+
+### Diagnosis history
+
+Every diagnosis is stored — conclusion only, never the raw probe payloads.
+That is what makes "the fourth time this month" visible. You can record what
+actually fixed it:
+
+```
+POST /api/endpoints/{id}/diagnoses/{diagnosis_id}/resolution
+```
+
+and the next time the same verdict comes back on that endpoint, your note is
+surfaced verbatim. It is the one field the engine cannot derive, and the one
+that turns a pile of diagnoses into something the next person on call can use.
+
+### Endpoints
+
+```
+POST /api/endpoints/{id}/diagnose?focus=auto    run a diagnosis (endpoint:check)
+GET  /api/endpoints/{id}/diagnoses              past diagnoses   (endpoint:read)
+POST /api/endpoints/{id}/diagnoses/{did}/resolution   record the fix
+```
+
+`focus` accepts `auto` (default), `endpoint`, `ssl`, `availability`,
+`performance`, `recent_failure` or `deployment_impact`.
+
+Diagnose makes live outbound requests, so it needs `endpoint:check`. It writes
+**nothing** to the monitoring history — diagnosing an endpoint never distorts
+its uptime figures.
+
+---
+
+## 16. API reference
 
 Interactive docs: **<http://localhost:8080/api/docs>** (Swagger UI) and
 `/api/redoc`. Machine-readable: `/api/openapi.json`.
@@ -879,7 +1048,7 @@ response to the full detail in the log; exception text is never echoed.
 
 ---
 
-## 16. Local development
+## 17. Local development
 
 ### Backend
 
@@ -917,7 +1086,7 @@ Point it elsewhere with `VITE_API_TARGET=http://localhost:8000 npm run dev`.
 
 ---
 
-## 17. Testing
+## 18. Testing
 
 ```bash
 cd backend
@@ -947,6 +1116,7 @@ and the JSON/BigInteger columns carry SQLite variants for exactly this reason.
 | `test_monitoring_state.py` | One incident per outage, recovery and downtime, alert generation, cooldown, certificate rotation, re-grading |
 | `test_endpoints_api.py` | CRUD, validation, duplicates, credential handling, filters, sorting, pagination, bulk actions |
 | `test_import_export.py` | Valid/invalid CSV, missing fields, duplicates, aliases, Excel, idempotent re-import, credential-free export |
+| `test_diagnostics.py` | The Diagnose reasoning layer: evidence ranking, confidence bands, severity classification, and the honesty rules that stop it inventing infrastructure it cannot see |
 | `test_health_and_settings.py` | Probes, security headers, settings validation, user management invariants, channels, OpenAPI completeness |
 | `test_changes.py` | The change workflow and its effect on monitoring: approval routing, self-approval refused, pause on deploy, resume on complete/fail, an already-paused endpoint left alone, concurrent-deployment conflict, activity timeline |
 
@@ -956,7 +1126,7 @@ real X.509 material going through the same parsing path a live handshake uses.
 
 ---
 
-## 18. Backup and recovery
+## 19. Backup and recovery
 
 ### What to back up
 
@@ -1035,7 +1205,7 @@ docker compose up -d
 
 ---
 
-## 19. Production deployment
+## 20. Production deployment
 
 **Before going live**
 
@@ -1101,7 +1271,7 @@ replicas beyond that.
 
 ---
 
-## 20. Kubernetes considerations
+## 21. Kubernetes considerations
 
 The design already assumes it. Notes for a chart:
 
@@ -1168,7 +1338,7 @@ worker can finish in-flight checks and release its leases.
 
 ---
 
-## 21. Troubleshooting
+## 22. Troubleshooting
 
 **Everything: check the logs first.**
 
@@ -1279,7 +1449,7 @@ severity/event/environment/tag filters.
 
 ---
 
-## 22. Security notes
+## 23. Security notes
 
 - Passwords: bcrypt cost 12. Never logged, never returned, never exported.
 - Endpoint credentials and channel configs: Fernet-encrypted at rest,
@@ -1308,7 +1478,7 @@ severity/event/environment/tag filters.
 
 ---
 
-## 23. Project structure
+## 24. Project structure
 
 ```
 certmonitor/
@@ -1317,7 +1487,8 @@ certmonitor/
 │   │   ├── env.py
 │   │   └── versions/                     0001 initial schema,
 │   │                                     0002 change management,
-│   │                                     0003 health-path discovery
+│   │                                     0003 health-path discovery,
+│   │                                     0004 diagnosis history
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── deps.py                       auth, RBAC, pagination
@@ -1337,7 +1508,7 @@ certmonitor/
 │   │   ├── services/                         monitoring, stats, endpoints,
 │   │   │                                     users, alerts, notifications,
 │   │   │                                     import/export, retention, settings,
-│   │   │                                     diagnostics, changes
+│   │   │                                     diagnostics + reasoning, changes
 │   │   ├── workers/monitor_worker.py         the monitoring process
 │   │   ├── bootstrap.py                      first-boot seeding
 │   │   └── main.py                           app factory, middleware, handlers

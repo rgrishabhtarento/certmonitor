@@ -20,8 +20,9 @@ from app.api.deps import (
     parse_uuid_list,
     split_csv_param,
 )
-from app.core.enums import AuditAction, EndpointStatus
+from app.core.enums import AuditAction, DiagnosisFocus, EndpointStatus
 from app.core.logging import get_logger
+from app.models.diagnosis import Diagnosis
 from app.models.endpoint import Endpoint, Environment, Tag
 from app.models.incident import Incident
 from app.models.monitoring import MonitoringResult, SslCertificate
@@ -43,6 +44,8 @@ from app.schemas.endpoint import (
 )
 from app.schemas.monitoring import (
     CheckNowResponse,
+    DiagnosisHistoryItem,
+    DiagnosisResolution,
     DiagnosticsResponse,
     MonitoringResultRead,
     SslCertificateRead,
@@ -555,20 +558,45 @@ async def diagnose_endpoint(
     user: CheckEndpoints,
     request: Request,
     session: DbSession,
+    focus: Annotated[
+        str,
+        Query(
+            description=(
+                "auto | endpoint | ssl | availability | performance | "
+                "recent_failure | deployment_impact. Recorded with the "
+                "diagnosis; `auto` decides what to investigate."
+            )
+        ),
+    ] = DiagnosisFocus.AUTO.value,
 ) -> DiagnosticsResponse:
-    """Isolate which layer of the request is broken, and say what to do.
+    """Investigate a failing endpoint the way an engineer would.
 
     Probes DNS, TCP (per resolved address), TLS and HTTP as separate stages,
-    then combines that with the endpoint's stored history and with what
-    sibling endpoints are doing. The result names the deepest layer that still
-    works, so the fault is localised immediately.
+    then reasons over that alongside the endpoint's stored history, its open
+    incident, recent deployments from Change Management, how the rest of its
+    application is doing, and how often this has happened before.
+
+    The result is a *ranked* set of probable causes with the evidence behind
+    each, a confidence band derived from that evidence, prioritised actions
+    labelled by blast radius, and a verification plan. Everything CertMonitor
+    cannot see - container state, host resources, application logs - is listed
+    explicitly rather than guessed at.
 
     Requires ``endpoint:check`` because it makes live outbound requests. It
     writes nothing to the monitoring history, so diagnosing an endpoint never
-    distorts its uptime figures.
+    distorts its uptime figures; the conclusion is stored separately so
+    recurring problems can be recognised.
     """
+    if focus not in {f.value for f in DiagnosisFocus}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown focus '{focus}'.",
+        )
+
     endpoint = await _load_endpoint(session, endpoint_id)
-    report = await diagnostics_service.diagnose(session, endpoint)
+    report = await diagnostics_service.diagnose(
+        session, endpoint, focus=focus, user=user
+    )
 
     await audit_service.record(
         session,
@@ -579,13 +607,109 @@ async def diagnose_endpoint(
         resource_name=endpoint.name,
         details={
             "diagnostics": True,
+            "focus": focus,
             "verdict": report["verdict"],
+            "severity": report["severity"],
+            "confidence": report["confidence"],
             "deepest_layer_ok": report["deepest_layer_ok"],
         },
         request=request,
     )
     await session.commit()
     return DiagnosticsResponse.model_validate(report)
+
+
+@router.get(
+    "/{endpoint_id}/diagnoses",
+    response_model=Page[DiagnosisHistoryItem],
+    summary="Past diagnoses for this endpoint",
+)
+async def endpoint_diagnoses(
+    endpoint_id: uuid.UUID,
+    session: DbSession,
+    _user: ReadEndpoints,
+    page: Pagination,
+) -> Page[DiagnosisHistoryItem]:
+    """Previous conclusions, newest first.
+
+    This is what makes "the same problem for the fourth time this month"
+    visible. Read-only, so it needs only ``endpoint:read``.
+    """
+    await _load_endpoint(session, endpoint_id)
+
+    stmt = select(Diagnosis).where(Diagnosis.endpoint_id == endpoint_id)
+    total = (
+        await session.execute(
+            select(func.count()).select_from(stmt.subquery())
+        )
+    ).scalar() or 0
+
+    rows = (
+        (
+            await session.execute(
+                stmt.order_by(Diagnosis.created_at.desc())
+                .limit(page.page_size)
+                .offset(page.offset)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return Page.build(
+        [DiagnosisHistoryItem.model_validate(row, from_attributes=True) for row in rows],
+        total=int(total),
+        page=page.page,
+        page_size=page.page_size,
+    )
+
+
+@router.post(
+    "/{endpoint_id}/diagnoses/{diagnosis_id}/resolution",
+    response_model=DiagnosisHistoryItem,
+    summary="Record what actually fixed it",
+)
+async def record_diagnosis_resolution(
+    endpoint_id: uuid.UUID,
+    diagnosis_id: int,
+    payload: DiagnosisResolution,
+    user: WriteEndpoints,
+    request: Request,
+    session: DbSession,
+) -> DiagnosisHistoryItem:
+    """Note the fix against a past diagnosis.
+
+    The one thing the engine cannot work out for itself, and the thing that
+    makes the history worth keeping: the next time this endpoint produces the
+    same verdict, the resolution recorded here is surfaced verbatim.
+    """
+    diagnosis = (
+        await session.execute(
+            select(Diagnosis).where(
+                Diagnosis.id == diagnosis_id,
+                Diagnosis.endpoint_id == endpoint_id,
+            )
+        )
+    ).scalars().first()
+    if diagnosis is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Diagnosis not found."
+        )
+
+    await diagnostics_service.record_resolution(
+        session, diagnosis, resolution=payload.resolution, user=user
+    )
+    await audit_service.record(
+        session,
+        action=AuditAction.ENDPOINT_UPDATED.value,
+        user=user,
+        resource_type="diagnosis",
+        resource_id=diagnosis.id,
+        resource_name=f"diagnosis {diagnosis.id}",
+        details={"resolution_recorded": True, "verdict": diagnosis.verdict},
+        request=request,
+    )
+    await session.commit()
+    return DiagnosisHistoryItem.model_validate(diagnosis, from_attributes=True)
 
 
 @router.get(

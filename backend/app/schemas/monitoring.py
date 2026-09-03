@@ -382,24 +382,100 @@ class DiagnosticFinding(BaseModel):
     action: str = Field(description="The concrete next step to take.")
 
 
+class DiagnosticEvidence(BaseModel):
+    """One fact the conclusion rests on.
+
+    ``kind`` is the honesty mechanism: ``observed`` was measured or read from
+    the database, ``inferred`` is a conclusion drawn from observations, and
+    ``unknown`` names something relevant that CertMonitor cannot see from
+    where it runs - so the reader knows to check it themselves rather than
+    assuming it was covered.
+    """
+
+    label: str
+    value: str
+    kind: str = Field(description="observed | inferred | unknown")
+    status: str | None = Field(default=None, description="ok | warning | failed")
+    detail: str | None = None
+
+
+class DiagnosticCandidate(BaseModel):
+    """A possible root cause, with the evidence that scored it.
+
+    ``share`` is the candidate's proportion of total accumulated evidence
+    weight. It is not a probability, and is labelled as a weight in the UI -
+    putting a decimal point on a handful of heuristics would imply a rigour
+    that is not there. ``band`` is the honest version.
+    """
+
+    cause: str
+    label: str
+    explanation: str
+    score: int
+    share: float
+    band: str = Field(description="most_likely | possible | less_likely")
+    why: list[str] = Field(default_factory=list)
+
+
+class DiagnosticAction(BaseModel):
+    """Something to do about it, with its blast radius stated.
+
+    Ordered safest first, so an engineer who stops after step two has still
+    done the sensible thing. Nothing marked ``high_risk`` is ever executed by
+    CertMonitor - it is only described.
+    """
+
+    step: int
+    title: str
+    detail: str
+    risk: str = Field(description="safe | disruptive | high_risk")
+    command: str | None = None
+    command_note: str | None = None
+
+
+class DiagnosticCommand(BaseModel):
+    command: str
+    note: str
+    risk: str = "safe"
+
+
 class DiagnosticsResponse(BaseModel):
     """Triage for one endpoint.
 
-    ``deepest_layer_ok`` is the single most useful field: it names the last
-    stage that worked, so the fault is localised without reading anything
-    else.
+    Reads top to bottom the way an engineer works: what is wrong, how
+    confident we are, the evidence, what changed recently, what to do, and how
+    to tell whether it worked.
     """
 
     endpoint_id: uuid.UUID
     endpoint_name: str
     url: str
+    application: str | None = None
+    environment: str | None = None
     current_status: str
     generated_at: datetime
     elapsed_ms: float
+    focus: str = "auto"
+    diagnosis_id: int | None = None
 
     verdict: str
     summary: str
+    root_cause: str | None = None
+    confidence: str = Field(description="high | medium | low")
+    severity: str = Field(description="info | low | medium | high | critical")
     deepest_layer_ok: str | None = None
+    failure_started_at: datetime | None = None
+
+    candidates: list[DiagnosticCandidate] = Field(default_factory=list)
+    evidence: list[DiagnosticEvidence] = Field(default_factory=list)
+    not_observable: list[DiagnosticEvidence] = Field(
+        default_factory=list,
+        description="What CertMonitor cannot see from outside the endpoint, "
+        "stated explicitly so no reader mistakes silence for a clean bill.",
+    )
+    actions: list[DiagnosticAction] = Field(default_factory=list)
+    commands: list[DiagnosticCommand] = Field(default_factory=list)
+    verification: list[str] = Field(default_factory=list)
 
     layers: list[DiagnosticLayer] = Field(default_factory=list)
     findings: list[DiagnosticFinding] = Field(default_factory=list)
@@ -410,3 +486,49 @@ class DiagnosticsResponse(BaseModel):
     )
     history: dict[str, Any] = Field(default_factory=dict)
     correlation: dict[str, Any] = Field(default_factory=dict)
+    changes: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Deployments near the failure. Correlation only - the "
+        "wording throughout never claims causation.",
+    )
+    incidents: dict[str, Any] = Field(default_factory=dict)
+    recurrence: dict[str, Any] = Field(default_factory=dict)
+    application_summary: dict[str, Any] | None = None
+
+
+class DiagnosisHistoryItem(BaseModel):
+    """A past diagnosis, for spotting a recurring problem."""
+
+    id: int
+    endpoint_id: uuid.UUID
+    endpoint_name: str | None = None
+    application: str | None = None
+    created_at: datetime
+    requested_by: str | None = None
+    focus: str
+
+    verdict: str
+    severity: str
+    confidence: str
+    headline: str
+    root_cause: str | None = None
+    endpoint_status: str | None = None
+    deepest_layer_ok: str | None = None
+    http_status_code: int | None = None
+    response_time_ms: float | None = None
+    incident_id: int | None = None
+    change_id: int | None = None
+
+    resolution: str | None = None
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None
+
+
+class DiagnosisResolution(BaseModel):
+    """What actually fixed it.
+
+    The one field the engine cannot derive. Recorded by the operator and
+    surfaced verbatim the next time the same verdict comes back.
+    """
+
+    resolution: str = Field(min_length=1, max_length=4000)

@@ -240,9 +240,22 @@ export const endpointsApi = {
       .then((r) => r.data),
   // Runs several live probes back to back, so it needs a longer ceiling than
   // the client default.
-  diagnose: (id) =>
+  // Past diagnoses, newest first - what makes a recurring problem visible.
+  diagnoses: (id, params) =>
     api
-      .post(`/endpoints/${id}/diagnose`, null, { timeout: 90000 })
+      .get(`/endpoints/${id}/diagnoses`, { params: cleanParams(params) })
+      .then((r) => r.data),
+  recordResolution: (id, diagnosisId, resolution) =>
+    api
+      .post(`/endpoints/${id}/diagnoses/${diagnosisId}/resolution`, { resolution })
+      .then((r) => r.data),
+  diagnose: (id, focus) =>
+    api
+      .post(`/endpoints/${id}/diagnose`, null, {
+        params: cleanParams({ focus }),
+        // Runs a full layered probe sequence, so it is slower than a check.
+        timeout: 90000,
+      })
       .then((r) => r.data),
   history: (id, params) =>
     api.get(`/endpoints/${id}/history`, { params: cleanParams(params) }).then((r) => r.data),

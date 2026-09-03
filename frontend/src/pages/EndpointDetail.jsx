@@ -108,14 +108,21 @@ export default function EndpointDetail() {
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [diagnostics, setDiagnostics] = useState(null)
   const [diagnosticsError, setDiagnosticsError] = useState(null)
+  // Kept so a re-run can be shown as a before/after. Verifying a fix is about
+  // the delta, not about re-reading an absolute state.
+  const [previousDiagnosis, setPreviousDiagnosis] = useState(null)
 
-  const runDiagnostics = async () => {
+  const runDiagnostics = async (focus = 'auto', { rerun = false } = {}) => {
     setDiagnosticsOpen(true)
     setDiagnosing(true)
+    setPreviousDiagnosis(rerun ? diagnostics : null)
     setDiagnostics(null)
     setDiagnosticsError(null)
     try {
-      setDiagnostics(await endpointsApi.diagnose(endpointId))
+      const report = await endpointsApi.diagnose(endpointId, focus)
+      setDiagnostics(report)
+      // A diagnosis re-reads live state; the header may now disagree with it.
+      loadEndpoint().catch(() => {})
     } catch (err) {
       setDiagnosticsError(err.message)
     } finally {
@@ -307,9 +314,9 @@ export default function EndpointDetail() {
                     endpoint.current_status === 'down' &&
                       'border-red-300 text-red-700 dark:border-red-800 dark:text-red-300',
                   )}
-                  onClick={runDiagnostics}
+                  onClick={() => runDiagnostics()}
                   disabled={diagnosing}
-                  title="Isolate which layer is failing and what to do about it"
+                  title="Investigate which layer is failing, why, and what to do about it"
                 >
                   {diagnosing ? <Spinner size={15} /> : <Stethoscope size={15} />}
                   Diagnose
@@ -1029,8 +1036,10 @@ export default function EndpointDetail() {
         open={diagnosticsOpen}
         onClose={() => setDiagnosticsOpen(false)}
         report={diagnostics}
+        previous={previousDiagnosis}
         loading={diagnosing}
         error={diagnosticsError}
+        onRerun={(focus) => runDiagnostics(focus, { rerun: true })}
       />
 
       <ConfirmDialog
