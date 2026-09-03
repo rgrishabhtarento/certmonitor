@@ -681,18 +681,25 @@ async def availability_by_group(
         )
     elif group in ("team", "owner", "application"):
         column = getattr(Endpoint, group)
+        # Group by the bare column, and substitute the "Unassigned" label in
+        # Python. Wrapping it in coalesce() here would put a bound parameter
+        # inside GROUP BY, and every call to func.coalesce() creates its own
+        # parameter - so the SELECT rendered coalesce(team, $1) while GROUP BY
+        # rendered coalesce(team, $15). PostgreSQL compares those expressions
+        # syntactically, could not match them, and rejected the query with
+        # "column endpoints.team must appear in the GROUP BY clause".
         stmt = (
             select(
-                func.coalesce(column, "Unassigned"),
-                func.coalesce(column, "Unassigned"),
+                column,
+                column,
                 func.count(Endpoint.id),
                 func.coalesce(func.sum(up_expr), 0),
                 func.coalesce(func.sum(down_expr), 0),
                 func.coalesce(func.sum(degraded_expr), 0),
                 func.avg(Endpoint.last_response_time_ms),
             )
-            .group_by(func.coalesce(column, "Unassigned"))
-            .order_by(func.coalesce(column, "Unassigned"))
+            .group_by(column)
+            .order_by(column.asc().nulls_last())
         )
     else:
         raise ValueError(f"unsupported grouping '{group}'")
@@ -707,7 +714,9 @@ async def availability_by_group(
         groups.append(
             {
                 "id": str(row[0]) if row[0] is not None else None,
-                "name": row[1],
+                # NULL owner/team/application groups together under one label.
+                # Environment and tag groupings always carry a real name.
+                "name": row[1] if row[1] is not None else "Unassigned",
                 "total": total,
                 "healthy": healthy,
                 "down": int(row[4] or 0),
