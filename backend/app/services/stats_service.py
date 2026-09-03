@@ -19,7 +19,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Sequence
 
-from sqlalchemy import Float, Integer, case, cast, false, func, or_, select
+from sqlalchemy import (
+    Float,
+    Integer,
+    case,
+    cast,
+    extract,
+    false,
+    func,
+    or_,
+    select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import CheckStatus, EndpointStatus, SslStatus
@@ -263,12 +273,18 @@ async def availability_summary(
 
 # --------------------------------------------------------- time series
 def _bucket_expression(session: AsyncSession, bucket_seconds: int):
-    """Dialect-aware epoch bucket index for grouping a time series."""
+    """Dialect-aware epoch bucket index for grouping a time series.
+
+    Uses the ``extract()`` construct, never ``func.extract()``. The latter
+    treats the field name as a value and emits ``extract($1, col)``, which
+    PostgreSQL rejects - it requires the keyword form
+    ``EXTRACT(epoch FROM col)``. That mistake made every chart query fail.
+    """
     dialect = session.bind.dialect.name if session.bind else ""
     if dialect == "postgresql":
         return cast(
             func.floor(
-                func.extract("epoch", MonitoringResult.checked_at) / bucket_seconds
+                extract("epoch", MonitoringResult.checked_at) / bucket_seconds
             ),
             Integer,
         )
@@ -278,7 +294,7 @@ def _bucket_expression(session: AsyncSession, bucket_seconds: int):
         )
     return cast(
         func.floor(
-            func.extract("epoch", MonitoringResult.checked_at) / bucket_seconds
+            extract("epoch", MonitoringResult.checked_at) / bucket_seconds
         ),
         Integer,
     )

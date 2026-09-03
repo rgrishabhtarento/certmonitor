@@ -131,7 +131,7 @@ export default function Dashboard() {
         })
         setData(payload)
       } catch (err) {
-        setError(err.message)
+        setError(err)
         if (silent) toast.error(`Could not refresh the dashboard: ${err.message}`)
       } finally {
         setLoading(false)
@@ -183,7 +183,12 @@ export default function Dashboard() {
     return (
       <>
         <PageHeader title="Dashboard" />
-        <ErrorState message={error} onRetry={() => load()} />
+        <ErrorState
+          message={error.message}
+          status={error.status}
+          requestId={error.requestId}
+          onRetry={() => load()}
+        />
       </>
     )
   }

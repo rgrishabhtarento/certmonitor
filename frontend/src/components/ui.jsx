@@ -178,7 +178,7 @@ export function EmptyState({ icon: Icon, title, description, action }) {
   )
 }
 
-export function ErrorState({ message, onRetry }) {
+export function ErrorState({ message, onRetry, requestId, status }) {
   return (
     <div
       role="alert"
@@ -186,6 +186,18 @@ export function ErrorState({ message, onRetry }) {
     >
       <AlertCircle className="text-red-500" size={26} />
       <p className="text-sm font-medium text-red-800 dark:text-red-200">{message}</p>
+      {/* The API never echoes exception text, so the request id is the only
+          way to find the matching traceback in the logs. Showing it here saves
+          guessing which log line belongs to this failure. */}
+      {requestId ? (
+        <p className="font-mono text-[11px] text-red-600/80 dark:text-red-300/70">
+          {status ? `HTTP ${status} · ` : ''}request {requestId}
+          <br />
+          <span className="font-sans">
+            find it with: docker compose logs backend | grep {requestId}
+          </span>
+        </p>
+      ) : null}
       {onRetry ? (
         <button type="button" className="btn-secondary btn-sm" onClick={onRetry}>
           Try again
@@ -502,18 +514,30 @@ export function Pagination({ meta, onPageChange, onPageSizeChange }) {
 /** Sortable column header. */
 export function SortHeader({ label, field, sortBy, sortDir, onSort, align = 'left' }) {
   const active = sortBy === field
+  const right = align === 'right'
   return (
-    <th className={align === 'right' ? 'text-right' : undefined}>
+    <th className={right ? 'text-right' : undefined} aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
       <button
         type="button"
         className={clsx(
-          'inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-slate-100',
+          // Tailwind's preflight makes a button inherit font family, size and
+          // weight - but NOT text-transform or letter-spacing, which the UA
+          // stylesheet resets on form controls. Without restating them here a
+          // sortable header renders in title case while its plain-<th>
+          // neighbours render uppercase, which is the mismatch this fixes.
+          'inline-flex items-center gap-1 uppercase tracking-wide',
+          // Fill the cell so a right-aligned header sits directly over the
+          // right-aligned numbers below it, not floating mid-cell.
+          right && 'w-full justify-end',
+          'hover:text-slate-900 dark:hover:text-slate-100',
           active && 'text-brand-600 dark:text-brand-400',
         )}
         onClick={() => onSort(field, active && sortDir === 'asc' ? 'desc' : 'asc')}
       >
         {label}
-        {active ? <span aria-hidden="true">{sortDir === 'asc' ? '↑' : '↓'}</span> : null}
+        <span aria-hidden="true" className={active ? undefined : 'opacity-0'}>
+          {sortDir === 'asc' && active ? '↑' : '↓'}
+        </span>
       </button>
     </th>
   )
