@@ -34,7 +34,13 @@ class Settings(BaseSettings):
 
     # CORS. In production the frontend is served by the same nginx that proxies
     # /api, so no cross-origin request happens and this can stay empty.
-    CORS_ORIGINS: list[str] = Field(default_factory=list)
+    # Typed as a plain string, NOT list[str], on purpose. pydantic-settings
+    # classifies a list-annotated field as "complex" and runs json.loads() on
+    # the raw environment value inside the settings source - which happens
+    # before any field_validator can intervene. An empty or comma-separated
+    # value would therefore raise JSONDecodeError at import time. Parsing is
+    # done by the `cors_origins` property instead.
+    CORS_ORIGINS: str = ""
 
     # Comma-separated Host allow-list. Leave empty when a reverse proxy
     # terminates requests (the default Compose topology).
@@ -115,18 +121,6 @@ class Settings(BaseSettings):
     MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024
 
     # ------------------------------------------------------------ validators
-    @field_validator("CORS_ORIGINS", mode="before")
-    @classmethod
-    def _split_origins(cls, value: Any) -> Any:
-        if isinstance(value, str):
-            value = value.strip()
-            if not value:
-                return []
-            if value.startswith("["):
-                return value
-            return [item.strip() for item in value.split(",") if item.strip()]
-        return value
-
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def _normalise_async_dsn(cls, value: Any) -> Any:
@@ -148,6 +142,40 @@ class Settings(BaseSettings):
         return self
 
     # ------------------------------------------------------------- helpers
+    @staticmethod
+    def _split_csv(raw: str) -> list[str]:
+        """Split a comma-separated env value, tolerating blanks and spaces."""
+        return [item.strip() for item in (raw or "").split(",") if item.strip()]
+
+    @property
+    def cors_origins(self) -> list[str]:
+        """Allowed CORS origins.
+
+        Accepts a comma-separated list (``https://a.com,https://b.com``) or a
+        JSON array, and treats an empty value as "no cross-origin requests" -
+        which is correct for the bundled deployment, where nginx serves the SPA
+        and proxies /api on the same origin.
+        """
+        raw = (self.CORS_ORIGINS or "").strip()
+        if not raw:
+            return []
+        if raw.startswith("["):
+            import json
+
+            try:
+                parsed = json.loads(raw)
+            except ValueError:
+                return self._split_csv(raw.strip("[]"))
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return []
+        return self._split_csv(raw)
+
+    @property
+    def allowed_hosts(self) -> list[str]:
+        """Host allow-list; empty means accept any Host header."""
+        return self._split_csv(self.ALLOWED_HOSTS)
+
     @property
     def sync_database_url(self) -> str:
         """Sync DSN used by Alembic migrations."""

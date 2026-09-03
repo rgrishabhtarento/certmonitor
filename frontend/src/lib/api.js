@@ -146,14 +146,35 @@ api.interceptors.response.use(
   },
 )
 
+/**
+ * Messages for responses that did NOT come from the API.
+ *
+ * nginx answers with its own HTML page when it cannot reach the backend, so
+ * there is no JSON `detail` to show. Saying "something went wrong" in that
+ * case hides the one fact worth knowing - which half of the stack is down.
+ */
+const TRANSPORT_MESSAGES = {
+  413: 'That file is too large to upload.',
+  429: 'Too many requests. Wait a moment and try again.',
+  502: 'The API is not responding. The backend service may be starting up, or it may have failed - check "docker compose ps" and "docker compose logs backend".',
+  503: 'The API is temporarily unavailable. It may still be starting up.',
+  504: 'The API took too long to respond.',
+}
+
 /** Turn any axios failure into a predictable shape for the UI. */
 export function normaliseError(error, fallback) {
   const status = error?.response?.status ?? 0
   const data = error?.response?.data
-  let message = fallback || 'Something went wrong.'
+  let message =
+    fallback ||
+    TRANSPORT_MESSAGES[status] ||
+    (status ? `Unexpected response from the server (HTTP ${status}).` : 'Something went wrong.')
   let fields = null
 
-  if (data) {
+  // An HTML body means a proxy answered, not the API - keep our own message.
+  const isHtml = typeof data === 'string' && data.trimStart().startsWith('<')
+
+  if (data && !isHtml) {
     if (typeof data.detail === 'string') {
       message = data.detail
     } else if (Array.isArray(data.detail)) {

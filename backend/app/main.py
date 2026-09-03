@@ -193,10 +193,11 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
-    if settings.CORS_ORIGINS:
+    cors_origins = settings.cors_origins
+    if cors_origins:
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=settings.CORS_ORIGINS,
+            allow_origins=cors_origins,
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
@@ -207,11 +208,7 @@ def create_app() -> FastAPI:
     # In the default deployment nginx terminates requests and proxies to the
     # API by service name, so Host is trusted. Operators exposing the API
     # directly should set ALLOWED_HOSTS.
-    allowed_hosts = [
-        host.strip()
-        for host in (getattr(settings, "ALLOWED_HOSTS", "") or "").split(",")
-        if host.strip()
-    ]
+    allowed_hosts = settings.allowed_hosts
     if allowed_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
