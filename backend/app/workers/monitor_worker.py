@@ -28,7 +28,7 @@ import socket
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload
 
@@ -119,9 +119,41 @@ class MonitorWorker:
                 await session.rollback()
                 logger.warning("heartbeat_write_failed", error=str(exc))
 
+    async def _retire_dead_workers(self) -> None:
+        """Delete heartbeats belonging to workers that are gone for good.
+
+        A worker takes a new identity whenever its container is recreated, so
+        without this the table accumulates one orphan row per rebuild and
+        /health reports "degraded" forever even though the live worker is fine.
+        """
+        cutoff = _now() - timedelta(seconds=settings.WORKER_RETIRE_AFTER_SECONDS)
+        try:
+            async with SessionFactory() as session:
+                result = await session.execute(
+                    delete(WorkerHeartbeat).where(
+                        WorkerHeartbeat.last_seen_at < cutoff,
+                        WorkerHeartbeat.worker_id != self.worker_id,
+                    )
+                )
+                await session.commit()
+                if result.rowcount:
+                    logger.info(
+                        "retired_dead_workers", removed=int(result.rowcount)
+                    )
+        except SQLAlchemyError as exc:
+            logger.warning("worker_retire_failed", error=str(exc))
+
     async def _heartbeat_loop(self) -> None:
+        # Sweep once at startup so a restart immediately clears the row its
+        # predecessor left behind.
+        await self._retire_dead_workers()
+        cycles = 0
         while not self._shutdown.is_set():
             await self._write_heartbeat()
+            cycles += 1
+            # Roughly every 5 minutes at the default 15s heartbeat.
+            if cycles % 20 == 0:
+                await self._retire_dead_workers()
             try:
                 await asyncio.wait_for(
                     self._shutdown.wait(), timeout=settings.WORKER_HEARTBEAT_SECONDS

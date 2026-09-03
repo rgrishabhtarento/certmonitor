@@ -72,6 +72,16 @@ async def _check_worker(session) -> ComponentHealth:
     now = datetime.now(timezone.utc)
     fresh: list[str] = []
     stale: list[str] = []
+    # A worker gets a fresh identity whenever its container is recreated, so
+    # every rebuild leaves its predecessor's row behind. Those rows are history,
+    # not a fault: past the retire window they are ignored here (and deleted by
+    # the worker's own sweep). Without this, one rebuild would pin the status at
+    # "degraded" permanently.
+    retire_after = max(
+        settings.WORKER_STALE_AFTER_SECONDS * 10,
+        settings.WORKER_RETIRE_AFTER_SECONDS,
+    )
+    retired = 0
     for row in rows:
         last_seen = row.last_seen_at
         if last_seen.tzinfo is None:
@@ -79,8 +89,19 @@ async def _check_worker(session) -> ComponentHealth:
         age = (now - last_seen).total_seconds()
         if age <= settings.WORKER_STALE_AFTER_SECONDS:
             fresh.append(row.worker_id)
-        else:
+        elif age <= retire_after:
             stale.append(row.worker_id)
+        else:
+            retired += 1
+
+    if not fresh and not stale:
+        return ComponentHealth(
+            status=_UNHEALTHY,
+            detail=(
+                f"no worker heartbeat within {settings.WORKER_STALE_AFTER_SECONDS}s"
+                + (f" ({retired} retired worker record(s))" if retired else "")
+            ),
+        )
 
     if fresh and not stale:
         return ComponentHealth(
