@@ -460,6 +460,43 @@ time forever and arrive as a thundering herd every interval.
 A worker that dies mid-batch strands nothing — its leases expire and the
 endpoints become claimable again.
 
+### Finding the health path
+
+Health endpoints are not standardised. Across one fleet you will find
+`/health`, Kubernetes-style `/healthz` and `/readyz`, Spring Boot's
+`/actuator/health` and a few hand-rolled variants — and someone importing fifty
+hosts at once cannot know which is which. Every one of those would otherwise
+sit permanently red on a 404 that says nothing about whether the service works.
+
+So when a check returns a status meaning **the path is not there** (404, 405,
+410, 501), CertMonitor tries the configured candidate paths in order and adopts
+the first that answers correctly. The endpoint reports its real state, and
+`resolved_health_path` records which path won — shown on the endpoints table
+and the detail page, with your configured `url` left exactly as you wrote it.
+
+The discipline that makes this safe is what *doesn't* trigger it:
+
+| Result | Discovery runs? | Why |
+|---|:-:|---|
+| 404 / 405 / 410 / 501 | **yes** | Nothing is at that path |
+| 500, 502, 503 | no | The application is there and broken — that is the answer |
+| 401 / 403 | no | The path exists; it is protected |
+| Timeout, connection refused, DNS or TLS failure | no | Not a path problem, and probing twelve paths on a dead host wastes the cycle |
+| Body-substring mismatch | no | The path exists and returned the wrong thing |
+
+Probing around a 5xx would report a broken service as healthy, which is worse
+than the 404 it replaced.
+
+Cost is bounded and paid once. A healthy endpoint makes exactly one request, as
+before. A discovered path is stored and probed directly from then on, so the
+search does not repeat every interval; it is forgotten and re-run only if that
+path later 404s, or if you edit the URL. Each probe gets its own 5-second cap
+so a slow host cannot turn one check into twelve timeouts.
+
+Configure it under **Settings → Monitoring**: `health_path_discovery` (on by
+default) and `health_path_candidates`. Emptying the candidate list disables
+probing without turning the feature off.
+
 ### What one check captures
 
 DNS resolution time and resolved IP; TCP connect time; TLS handshake time; TTFB;
@@ -905,7 +942,7 @@ and the JSON/BigInteger columns carry SQLite variants for exactly this reason.
 |---|---|
 | `test_validators.py` | URL parsing and rejection, status specs, interval/timeout clamping, blocked addresses |
 | `test_auth.py` | Login, invalid login, account enumeration, lockout, tokens, password policy, forced change, role authorisation, audit |
-| `test_checker.py` | Healthy, down, timeouts, TLS errors, DNS failure, HTTP mismatch, degraded, body matching, auth headers, redirects |
+| `test_checker.py` | Healthy, down, timeouts, TLS errors, DNS failure, HTTP mismatch, degraded, body matching, auth headers, redirects, health-path discovery and the failures it must NOT probe around |
 | `test_ssl.py` | Valid / expiring / critical / expired / invalid / self-signed / wildcard / hostname-mismatch certificates, chains, threshold classification |
 | `test_monitoring_state.py` | One incident per outage, recovery and downtime, alert generation, cooldown, certificate rotation, re-grading |
 | `test_endpoints_api.py` | CRUD, validation, duplicates, credential handling, filters, sorting, pagination, bulk actions |
@@ -1279,7 +1316,8 @@ certmonitor/
 │   ├── alembic/
 │   │   ├── env.py
 │   │   └── versions/                     0001 initial schema,
-│   │                                     0002 change management
+│   │                                     0002 change management,
+│   │                                     0003 health-path discovery
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── deps.py                       auth, RBAC, pagination

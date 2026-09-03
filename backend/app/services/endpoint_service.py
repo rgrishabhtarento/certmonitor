@@ -358,6 +358,9 @@ async def update_endpoint(
 
     if "url" in payload and payload["url"]:
         target = parse_target(str(payload["url"]))
+        if target.url != endpoint.url:
+            # A new URL invalidates any path discovered against the old one.
+            endpoint.resolved_health_path = None
         endpoint.url = target.url
         endpoint.protocol = target.protocol
         endpoint.hostname = target.hostname

@@ -17,10 +17,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import socket
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -59,6 +60,37 @@ _INTERESTING_HEADERS = {
 
 _MAX_BODY_PEEK_BYTES = 64 * 1024
 
+# Health endpoints are not standardised. The same fleet will expose Spring
+# Boot's /actuator/health, Kubernetes-style /healthz and /readyz, and a
+# hand-rolled /health, and an operator adding fifty hosts at once cannot be
+# expected to know which is which. When the configured path is definitively
+# absent, these are tried in order and the first one that answers correctly is
+# adopted - so the endpoint reports its real state instead of a permanent 404.
+DEFAULT_HEALTH_PATHS = [
+    "/health",
+    "/healthz",
+    "/health/ready",
+    "/ready",
+    "/readyz",
+    "/live",
+    "/livez",
+    "/actuator/health",
+    "/api/health",
+    "/v1/health",
+    "/status",
+    "/ping",
+]
+
+# Only a status that means "there is nothing at this path" starts a search.
+# A 5xx means the application IS there and is broken; a 401/403 means the path
+# exists behind auth. Probing alternatives in either case would turn a real
+# failure into a false pass, which is worse than the original problem.
+PATH_ABSENT_STATUSES = frozenset({404, 405, 410, 501})
+
+# Bounds on the search, so discovery can never dominate a check cycle.
+_MAX_PATH_CANDIDATES = 12
+_PATH_PROBE_TIMEOUT_SECONDS = 5.0
+
 
 @dataclass
 class CheckTarget:
@@ -91,6 +123,11 @@ class CheckTarget:
     ssl_critical_days: int = 7
     user_agent: str = "CertMonitor/1.0 (+endpoint-health-check)"
 
+    # Alternative paths to try when `url` turns out not to exist. Empty
+    # disables discovery entirely, which is the behaviour of every check that
+    # does not opt in.
+    health_path_candidates: list[str] = field(default_factory=list)
+
 
 @dataclass
 class CheckOutcome:
@@ -116,6 +153,13 @@ class CheckOutcome:
 
     error_message: str | None = None
     failure_reason: str = FailureReason.NONE.value
+
+    # Set when the configured path was absent and a different one answered.
+    # The caller persists it so later checks go straight there.
+    resolved_path: str | None = None
+    # Paths tried during discovery, with what each returned. Kept for the
+    # endpoint detail view so the adoption is visible rather than magic.
+    path_probes: list[dict[str, Any]] = field(default_factory=list)
 
     tls_version: str | None = None
     tls_cipher: str | None = None
@@ -377,6 +421,80 @@ async def _run_http_check(target: CheckTarget, outcome: CheckOutcome) -> CheckOu
     return outcome
 
 
+def _with_path(url: str, path: str) -> str:
+    """Swap the path of a URL, keeping scheme, host, port and query."""
+    parts = urlsplit(url)
+    if not path.startswith("/"):
+        path = "/" + path
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+
+
+async def _discover_health_path(
+    target: CheckTarget, original: CheckOutcome
+) -> CheckOutcome | None:
+    """Look for a health path that exists, after the configured one 404s.
+
+    Returns the winning outcome, or ``None`` if nothing answered - in which
+    case the caller keeps the original failure, because "we could not find a
+    health endpoint" is not evidence that the service is healthy.
+
+    Each probe gets a short timeout of its own: a host that is merely slow
+    must not turn one check into a twelve-timeout stall.
+    """
+    configured = urlsplit(target.url).path or "/"
+    seen = {configured.rstrip("/") or "/"}
+    probes: list[dict[str, Any]] = [
+        {"path": configured, "status": original.http_status_code, "adopted": False}
+    ]
+
+    for candidate in target.health_path_candidates[:_MAX_PATH_CANDIDATES]:
+        normalised = ("/" + candidate.strip().lstrip("/")).rstrip("/") or "/"
+        if normalised in seen:
+            continue
+        seen.add(normalised)
+
+        attempt = CheckOutcome(checked_at=original.checked_at)
+        attempt.resolved_ip = original.resolved_ip
+        probe_target = replace(
+            target,
+            url=_with_path(target.url, normalised),
+            timeout_seconds=int(
+                min(float(target.timeout_seconds), _PATH_PROBE_TIMEOUT_SECONDS)
+            ),
+            # The body-substring rule was written for the configured path and
+            # would reject an otherwise valid health response elsewhere.
+            expected_body_substring=None,
+        )
+        await _run_http_check(probe_target, attempt)
+
+        probes.append(
+            {
+                "path": normalised,
+                "status": attempt.http_status_code,
+                "adopted": attempt.is_up,
+            }
+        )
+        if attempt.is_up:
+            attempt.resolved_path = normalised
+            attempt.path_probes = probes
+            logger.info(
+                "health_path_discovered",
+                hostname=target.hostname,
+                configured=configured,
+                adopted=normalised,
+                original_status=original.http_status_code,
+            )
+            return attempt
+
+        # A transport-level failure means the host stopped answering at all;
+        # continuing down the list would just repeat the same error.
+        if attempt.http_status_code is None:
+            break
+
+    original.path_probes = probes
+    return None
+
+
 async def _run_tcp_check(target: CheckTarget, outcome: CheckOutcome) -> CheckOutcome:
     """Plain TCP reachability check (no TLS, no HTTP)."""
     host = outcome.resolved_ip or target.hostname
@@ -503,6 +621,22 @@ async def run_check(target: CheckTarget) -> CheckOutcome:
     else:
         await _run_http_check(target, outcome)
 
+        # ------------------------------------------ health-path discovery
+        # Only when the configured path is definitively absent. Everything
+        # else - a 5xx, a timeout, a TLS error, a body mismatch - is a real
+        # failure of a path that exists, and must be reported as one.
+        if (
+            target.health_path_candidates
+            and outcome.failure_reason == FailureReason.HTTP_STATUS_MISMATCH.value
+            and outcome.http_status_code in PATH_ABSENT_STATUSES
+        ):
+            found = await _discover_health_path(target, outcome)
+            if found is not None:
+                # Keep the DNS work already done; it was not repeated.
+                found.dns_time_ms = outcome.dns_time_ms
+                found.resolved_ip = found.resolved_ip or outcome.resolved_ip
+                outcome = found
+
     # ------------------------------------- certificate fallback for HTTPS
     # If the HTTP request failed before a handshake was observed, or the
     # runtime gave us no SSL object, inspect the certificate separately so an
@@ -565,8 +699,30 @@ def build_target_from_endpoint(endpoint: Any, *, auth_secret: str | None = None,
         threshold = defaults.get(
             "response_time_threshold_ms", settings.RESPONSE_TIME_THRESHOLD_MS
         )
+
+    # Discovery applies to HTTP checks only, and is off unless configured.
+    candidates: list[str] = []
+    if (
+        endpoint.check_type == CheckType.HTTP.value
+        and defaults.get("health_path_discovery", False)
+    ):
+        configured_paths = defaults.get("health_path_candidates")
+        # An explicitly emptied list means "do not probe"; only an absent
+        # setting falls back to the built-in list.
+        if not isinstance(configured_paths, list):
+            configured_paths = DEFAULT_HEALTH_PATHS
+        candidates = [str(p) for p in configured_paths if str(p).strip()]
+
+    # A path found on an earlier check is used directly, so the 404 and the
+    # search are paid once rather than every interval. The endpoint's own
+    # `url` is left untouched: it is the operator's configuration, not ours.
+    url = endpoint.url
+    resolved = getattr(endpoint, "resolved_health_path", None)
+    if resolved and endpoint.check_type == CheckType.HTTP.value:
+        url = _with_path(url, resolved)
+
     return CheckTarget(
-        url=endpoint.url,
+        url=url,
         hostname=endpoint.hostname,
         port=endpoint.port,
         protocol=endpoint.protocol,
@@ -588,4 +744,5 @@ def build_target_from_endpoint(endpoint: Any, *, auth_secret: str | None = None,
         response_time_threshold_ms=threshold,
         ssl_warning_days=int(warning_days),
         ssl_critical_days=int(critical_days),
+        health_path_candidates=candidates,
     )

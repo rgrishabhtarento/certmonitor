@@ -38,6 +38,7 @@ from app.core.enums import (
 from app.core.logging import get_logger
 from app.core.security import decrypt_secret
 from app.monitoring.checker import (
+    PATH_ABSENT_STATUSES,
     CheckOutcome,
     build_target_from_endpoint,
     run_check,
@@ -146,6 +147,8 @@ async def execute_check(
             "ssl_warning_days": thresholds["ssl_warning_days"],
             "ssl_critical_days": thresholds["ssl_critical_days"],
             "response_time_threshold_ms": thresholds["response_time_threshold_ms"],
+            "health_path_discovery": config.get("health_path_discovery", False),
+            "health_path_candidates": config.get("health_path_candidates"),
         },
     )
     return await run_check(target)
@@ -389,6 +392,32 @@ async def record_check_result(
     endpoint.last_response_time_ms = outcome.response_time_ms
     endpoint.last_error = outcome.error_message
     endpoint.total_checks = (endpoint.total_checks or 0) + 1
+
+    # ------------------------------------------------ health-path memory
+    # Remember a path found by discovery so the search is not repeated every
+    # interval, and forget one that has since stopped existing - a service
+    # that moves its health endpoint should be re-discovered, not left
+    # permanently failing against a stale guess.
+    if outcome.resolved_path:
+        if endpoint.resolved_health_path != outcome.resolved_path:
+            logger.info(
+                "health_path_adopted",
+                endpoint=endpoint.name,
+                path=outcome.resolved_path,
+                previous=endpoint.resolved_health_path,
+            )
+        endpoint.resolved_health_path = outcome.resolved_path
+    elif (
+        endpoint.resolved_health_path
+        and outcome.http_status_code in PATH_ABSENT_STATUSES
+    ):
+        logger.info(
+            "health_path_forgotten",
+            endpoint=endpoint.name,
+            path=endpoint.resolved_health_path,
+            status=outcome.http_status_code,
+        )
+        endpoint.resolved_health_path = None
 
     recorded = RecordedCheck(
         result=result,

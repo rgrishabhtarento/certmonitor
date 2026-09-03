@@ -535,6 +535,8 @@ async def check_endpoint_now(
         redirect_count=outcome.redirect_count,
         final_url=outcome.final_url,
         content_length=outcome.content_length,
+        resolved_path=outcome.resolved_path,
+        path_probes=outcome.path_probes,
         checked_at=outcome.checked_at,
         certificate=certificate,
         incident_opened=incident_opened,

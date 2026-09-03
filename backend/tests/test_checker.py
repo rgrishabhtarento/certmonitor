@@ -352,3 +352,173 @@ class TestRealDnsResolution:
         assert ip is None
         assert error is not None
         assert elapsed >= 0
+
+
+class TestHealthPathDiscovery:
+    """Endpoints in one fleet rarely agree on where health lives.
+
+    Discovery only ever runs when the configured path is *definitively*
+    absent. Every other failure must be reported as itself - turning a 500 or
+    a timeout into a pass by probing elsewhere would be worse than the 404.
+    """
+
+    CANDIDATES = ["/healthz", "/ready", "/actuator/health"]
+
+    @respx.mock
+    async def test_adopts_the_first_path_that_answers(self):
+        respx.get("https://api.example.com/health").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get("https://api.example.com/healthz").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get("https://api.example.com/ready").mock(
+            return_value=httpx.Response(200, json={"status": "ok"})
+        )
+
+        outcome = await run_check(target(health_path_candidates=self.CANDIDATES))
+
+        assert outcome.status == CheckStatus.UP.value
+        assert outcome.resolved_path == "/ready"
+        assert outcome.http_status_code == 200
+        # The trail is recorded so the adoption is auditable.
+        assert [p["path"] for p in outcome.path_probes] == [
+            "/health",
+            "/healthz",
+            "/ready",
+        ]
+        assert outcome.path_probes[-1]["adopted"] is True
+
+    @respx.mock
+    async def test_stays_down_when_no_path_answers(self):
+        """Not finding a health endpoint is not evidence of health."""
+        for path in ("/health", "/healthz", "/ready", "/actuator/health"):
+            respx.get(f"https://api.example.com{path}").mock(
+                return_value=httpx.Response(404)
+            )
+
+        outcome = await run_check(target(health_path_candidates=self.CANDIDATES))
+
+        assert outcome.status == CheckStatus.DOWN.value
+        assert outcome.resolved_path is None
+        assert outcome.http_status_code == 404
+        assert len(outcome.path_probes) == 4
+
+    @respx.mock
+    async def test_a_server_error_is_never_probed_around(self):
+        """500 means the application is there and broken. Searching for a
+        path that happens to return 200 would report a broken service as up."""
+        respx.get("https://api.example.com/health").mock(
+            return_value=httpx.Response(500)
+        )
+        healthz = respx.get("https://api.example.com/healthz").mock(
+            return_value=httpx.Response(200)
+        )
+
+        outcome = await run_check(target(health_path_candidates=self.CANDIDATES))
+
+        assert outcome.status == CheckStatus.DOWN.value
+        assert outcome.http_status_code == 500
+        assert outcome.resolved_path is None
+        assert not healthz.called
+
+    @respx.mock
+    async def test_an_auth_gated_path_is_never_probed_around(self):
+        """401/403 means the path exists - it is simply protected."""
+        respx.get("https://api.example.com/health").mock(
+            return_value=httpx.Response(401)
+        )
+        healthz = respx.get("https://api.example.com/healthz").mock(
+            return_value=httpx.Response(200)
+        )
+
+        outcome = await run_check(target(health_path_candidates=self.CANDIDATES))
+
+        assert outcome.http_status_code == 401
+        assert outcome.resolved_path is None
+        assert not healthz.called
+
+    @respx.mock
+    async def test_a_timeout_is_never_probed_around(self):
+        respx.get("https://api.example.com/health").mock(
+            side_effect=httpx.ConnectTimeout("timed out")
+        )
+        healthz = respx.get("https://api.example.com/healthz").mock(
+            return_value=httpx.Response(200)
+        )
+
+        outcome = await run_check(target(health_path_candidates=self.CANDIDATES))
+
+        assert outcome.status == CheckStatus.DOWN.value
+        assert outcome.failure_reason == FailureReason.CONNECTION_TIMEOUT.value
+        assert outcome.resolved_path is None
+        assert not healthz.called
+
+    @respx.mock
+    async def test_discovery_is_off_by_default(self):
+        """No candidates configured means exactly one request, as before."""
+        configured = respx.get("https://api.example.com/health").mock(
+            return_value=httpx.Response(404)
+        )
+        healthz = respx.get("https://api.example.com/healthz").mock(
+            return_value=httpx.Response(200)
+        )
+
+        outcome = await run_check(target())
+
+        assert outcome.status == CheckStatus.DOWN.value
+        assert outcome.resolved_path is None
+        assert configured.call_count == 1
+        assert not healthz.called
+
+    @respx.mock
+    async def test_a_healthy_endpoint_never_probes_alternatives(self):
+        """The common case must cost exactly one request."""
+        configured = respx.get("https://api.example.com/health").mock(
+            return_value=httpx.Response(200)
+        )
+        healthz = respx.get("https://api.example.com/healthz").mock(
+            return_value=httpx.Response(200)
+        )
+
+        outcome = await run_check(target(health_path_candidates=self.CANDIDATES))
+
+        assert outcome.status == CheckStatus.UP.value
+        assert outcome.resolved_path is None
+        assert configured.call_count == 1
+        assert not healthz.called
+
+    @respx.mock
+    async def test_the_query_string_is_preserved(self):
+        respx.get("https://api.example.com/health").mock(
+            return_value=httpx.Response(404)
+        )
+        route = respx.get("https://api.example.com/healthz", params={"verbose": "1"}).mock(
+            return_value=httpx.Response(200)
+        )
+
+        outcome = await run_check(
+            target(
+                url="https://api.example.com/health?verbose=1",
+                health_path_candidates=["/healthz"],
+            )
+        )
+
+        assert outcome.resolved_path == "/healthz"
+        assert route.called
+
+    @respx.mock
+    async def test_the_configured_path_is_not_retried_as_a_candidate(self):
+        configured = respx.get("https://api.example.com/health").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get("https://api.example.com/healthz").mock(
+            return_value=httpx.Response(200)
+        )
+
+        outcome = await run_check(
+            target(health_path_candidates=["/health", "/health/", "/healthz"])
+        )
+
+        assert outcome.resolved_path == "/healthz"
+        assert configured.call_count == 1

@@ -70,6 +70,11 @@ class CheckNowResponse(BaseModel):
     redirect_count: int = 0
     final_url: str | None = None
     content_length: int | None = None
+    # Populated when the configured path was absent and discovery found a
+    # working one; `path_probes` lists what was tried so the adoption is
+    # auditable rather than magic.
+    resolved_path: str | None = None
+    path_probes: list[dict[str, Any]] = Field(default_factory=list)
     checked_at: datetime
     certificate: "SslCertificateRead | None" = None
     incident_opened: int | None = None

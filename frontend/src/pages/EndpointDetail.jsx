@@ -205,6 +205,9 @@ export default function EndpointDetail() {
         result.status.toUpperCase(),
         result.http_status_code ? `HTTP ${result.http_status_code}` : null,
         result.response_time_ms ? `${Math.round(result.response_time_ms)} ms` : null,
+        // Say so when the answer came from a different path, otherwise a pass
+        // against a URL the operator knows 404s looks like a bug.
+        result.resolved_path ? `via ${result.resolved_path}` : null,
       ]
         .filter(Boolean)
         .join(' · ')
@@ -926,6 +929,15 @@ export default function EndpointDetail() {
             <DetailRow label="Path" mono>
               {endpoint.path}
             </DetailRow>
+            {endpoint.resolved_health_path ? (
+              <DetailRow label="Health path in use" mono>
+                {endpoint.resolved_health_path}
+                <p className="mt-0.5 font-sans text-xs text-slate-500 dark:text-slate-400">
+                  The configured path returned 404, so this one was found and
+                  adopted. Checks probe it directly; the URL above is unchanged.
+                </p>
+              </DetailRow>
+            ) : null}
             <DetailRow label="Check type">{endpoint.check_type}</DetailRow>
             <DetailRow label="HTTP method">{endpoint.http_method}</DetailRow>
             <DetailRow label="Expected status">{endpoint.expected_status_codes}</DetailRow>

@@ -531,6 +531,14 @@ export default function Endpoints() {
                           >
                             {endpoint.url}
                           </p>
+                          {endpoint.resolved_health_path ? (
+                            <p
+                              className="truncate font-mono text-[11px] text-brand-600 dark:text-brand-400"
+                              title={`The configured path was not found; checks use ${endpoint.resolved_health_path}`}
+                            >
+                              ↳ {endpoint.resolved_health_path}
+                            </p>
+                          ) : null}
                         </div>
                       </td>
 

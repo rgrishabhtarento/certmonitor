@@ -560,3 +560,64 @@ class TestOpenApi:
         text = response.text
         assert "test-secret-key" not in text
         assert "sqlite+aiosqlite" not in text
+
+
+class TestHealthPathDiscoverySettings:
+    async def test_the_candidate_list_round_trips(self, client, admin_headers):
+        response = await client.put(
+            "/api/settings",
+            json={
+                "updates": {
+                    "health_path_discovery": True,
+                    "health_path_candidates": ["/healthz", "/actuator/health"],
+                }
+            },
+            headers=admin_headers,
+        )
+        assert response.status_code == 200, response.text
+
+        effective = response.json()["effective"]
+        assert effective["health_path_discovery"] is True
+        assert effective["health_path_candidates"] == ["/healthz", "/actuator/health"]
+
+        again = await client.get("/api/settings", headers=admin_headers)
+        assert again.json()["effective"]["health_path_candidates"] == [
+            "/healthz",
+            "/actuator/health",
+        ]
+
+    async def test_discovery_reaches_the_check_target(
+        self, client, admin_headers, endpoint_factory, session
+    ):
+        """The setting has to survive the trip into the CheckTarget - it is
+        read from runtime config, not from the endpoint row."""
+        from app.monitoring.checker import build_target_from_endpoint
+
+        endpoint = await endpoint_factory(url="https://api.example.com/health")
+
+        off = build_target_from_endpoint(endpoint, defaults={})
+        assert off.health_path_candidates == []
+
+        on = build_target_from_endpoint(
+            endpoint,
+            defaults={
+                "health_path_discovery": True,
+                "health_path_candidates": ["/healthz"],
+            },
+        )
+        assert on.health_path_candidates == ["/healthz"]
+
+    async def test_a_discovered_path_is_used_on_the_next_check(
+        self, endpoint_factory
+    ):
+        """Once found, the path is probed directly - the 404 and the search
+        are paid once, not every interval."""
+        from app.monitoring.checker import build_target_from_endpoint
+
+        endpoint = await endpoint_factory(url="https://api.example.com/health")
+        endpoint.resolved_health_path = "/actuator/health"
+
+        target = build_target_from_endpoint(endpoint, defaults={})
+        assert target.url == "https://api.example.com/actuator/health"
+        # The operator's own configuration is left alone.
+        assert endpoint.url == "https://api.example.com/health"

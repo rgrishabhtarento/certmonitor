@@ -328,6 +328,9 @@ class EndpointListItem(ORMModel):
     # "Deployment CHG-2026-0001" - so a paused row explains itself.
     pause_reason: str | None = None
     paused_by_change_id: int | None = None
+    # Set when the configured path 404'd and a different one answered, e.g.
+    # "/actuator/health". The endpoint's own `url` is left as configured.
+    resolved_health_path: str | None = None
     interval_seconds: int
     timeout_seconds: int
 

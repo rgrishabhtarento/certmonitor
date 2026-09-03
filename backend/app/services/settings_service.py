@@ -19,6 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings as env_settings
 from app.core.logging import get_logger
+# The checker owns the default path list because it owns the probing; it
+# imports nothing from `app.services`, so there is no cycle here.
+from app.monitoring.checker import DEFAULT_HEALTH_PATHS
 from app.models.system import SystemSetting
 
 logger = get_logger(__name__)
@@ -135,6 +138,31 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         ),
         min_value=0,
         max_value=1440,
+    ),
+    SettingSpec(
+        key="health_path_discovery",
+        value_type="bool",
+        default=True,
+        category="monitoring",
+        label="Find the health path automatically",
+        description=(
+            "When the configured URL returns 404, try the common health paths "
+            "below and adopt the first that answers. Only a missing path "
+            "triggers this - a 5xx, a timeout or a TLS error is still reported "
+            "as the failure it is."
+        ),
+    ),
+    SettingSpec(
+        key="health_path_candidates",
+        value_type="json",
+        default=list(DEFAULT_HEALTH_PATHS),
+        category="monitoring",
+        label="Health paths to try",
+        description=(
+            "Tried in order, comma-separated. The first that returns an "
+            "expected status is remembered per endpoint, so the search runs "
+            "once rather than every interval."
+        ),
     ),
     SettingSpec(
         key="alerts_enabled",

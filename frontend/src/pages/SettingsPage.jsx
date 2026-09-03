@@ -40,6 +40,12 @@ const CATEGORY_META = {
   general: { label: 'General', icon: Server },
 }
 
+/** Settings stored as a list of strings, edited as comma-separated text. */
+const STRING_LIST_SETTINGS = {
+  change_approval_environments: 'production, staging',
+  health_path_candidates: '/health, /healthz, /ready, /actuator/health',
+}
+
 const CHANNEL_TYPES = [
   { value: 'webhook', label: 'Generic webhook' },
   { value: 'slack', label: 'Slack' },
@@ -178,14 +184,14 @@ export default function SettingsPage() {
       )
     }
 
-    // A list of environment names, edited as comma-separated text but stored
-    // as a list - the API rejects a bare string here.
-    if (setting.key === 'change_approval_environments') {
+    // Lists of strings, edited as comma-separated text but stored as a list -
+    // the API rejects a bare string here.
+    if (STRING_LIST_SETTINGS[setting.key]) {
       return (
         <Field label={setting.label} hint={setting.description}>
           <input
-            className={clsx('input', dirty && 'ring-1 ring-brand-400')}
-            placeholder="production, staging"
+            className={clsx('input font-mono text-xs', dirty && 'ring-1 ring-brand-400')}
+            placeholder={STRING_LIST_SETTINGS[setting.key]}
             value={Array.isArray(value) ? value.join(', ') : String(value ?? '')}
             disabled={!canWrite || !setting.is_editable}
             onChange={(event) =>

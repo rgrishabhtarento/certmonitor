@@ -254,20 +254,36 @@ export function Toggle({ checked, onChange, label, description, disabled }) {
 }
 
 /** Debounced search box: fires onChange after typing settles. */
-export function SearchInput({ value, onChange, placeholder = 'Search…', delay = 350 }) {
+export function SearchInput({ value, onChange, placeholder = 'Search…', delay = 250 }) {
   const [local, setLocal] = useState(value ?? '')
   const timer = useRef(null)
+  // The last value we handed to the parent. The parent echoes it straight back
+  // as `value`, and without this the echo of an earlier keystroke would
+  // overwrite what has been typed since - the input would visibly snap back
+  // mid-word and drop characters.
+  const emitted = useRef(value ?? '')
 
   useEffect(() => {
-    setLocal(value ?? '')
+    const next = value ?? ''
+    if (next !== emitted.current) {
+      // A genuine outside change (cleared filters, a link with ?search=…).
+      emitted.current = next
+      setLocal(next)
+    }
   }, [value])
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
+  const emit = (next) => {
+    clearTimeout(timer.current)
+    emitted.current = next
+    onChange(next)
+  }
+
   const handle = (next) => {
     setLocal(next)
     clearTimeout(timer.current)
-    timer.current = setTimeout(() => onChange(next), delay)
+    timer.current = setTimeout(() => emit(next), delay)
   }
 
   return (
@@ -284,6 +300,19 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', delay 
         placeholder={placeholder}
         aria-label={placeholder}
         onChange={(event) => handle(event.target.value)}
+        // Enter searches now instead of waiting out the debounce; Escape
+        // clears. The type=search clear button fires `change` with an empty
+        // value, which the debounce already handles.
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            emit(local)
+          } else if (event.key === 'Escape' && local) {
+            event.preventDefault()
+            setLocal('')
+            emit('')
+          }
+        }}
       />
     </div>
   )

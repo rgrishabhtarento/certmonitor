@@ -137,6 +137,10 @@ class Endpoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     paused_by_change_id: Mapped[int | None] = mapped_column(
         BigIntType, ForeignKey("changes.id", ondelete="SET NULL"), index=True
     )
+    # A health path discovered automatically after the configured one turned
+    # out to be absent. Kept separate from `url` so the operator's own
+    # configuration is never rewritten behind their back.
+    resolved_health_path: Mapped[str | None] = mapped_column(String(255))
     interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
 
