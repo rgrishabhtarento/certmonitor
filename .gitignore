@@ -1,0 +1,39 @@
+# Secrets - never commit a populated .env
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.sqlite
+*.sqlite3
+*.db
+
+# Node
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local artefacts
+docker-compose.override.yml
+backups/

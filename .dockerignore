@@ -1,0 +1,54 @@
+# Keep build contexts small and never ship secrets or local state into an image.
+
+.git
+.gitignore
+.github
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Documentation and meta
+README.md
+docs/
+*.md
+!backend/README.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+*.sqlite
+*.sqlite3
+*.db
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local compose overrides
+docker-compose.override.yml
+backups/

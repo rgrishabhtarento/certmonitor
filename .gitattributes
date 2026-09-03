@@ -1,0 +1,57 @@
+# Line-ending policy.
+#
+# This project is built and run inside Linux containers, so anything the
+# container executes or parses MUST keep LF endings regardless of the
+# platform it was cloned on. A CRLF in entrypoint.sh produces the classic
+# "bad interpreter: /usr/bin/env bash^M" failure on `docker compose up`.
+
+# Normalise to LF in the repository, and let Git decide the working copy for
+# anything not pinned below.
+* text=auto eol=lf
+
+# --- must be LF in the working copy too (executed or read by Linux) ---
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+.dockerignore   text eol=lf
+*.conf          text eol=lf
+*.ini           text eol=lf
+*.mako          text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.env           text eol=lf
+.env.example    text eol=lf
+
+*.py            text eol=lf
+*.js            text eol=lf
+*.jsx           text eol=lf
+*.css           text eol=lf
+*.html          text eol=lf
+*.json          text eol=lf
+*.md            text eol=lf
+*.sql           text eol=lf
+*.txt           text eol=lf
+
+# The entrypoint is the file that actually breaks; pin it explicitly and mark
+# it executable so the mode survives a clone on Windows.
+backend/docker/entrypoint.sh text eol=lf
+
+# --- binary: never touch ---
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.webp   binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+*.otf    binary
+*.pdf    binary
+*.xlsx   binary
+*.zip    binary
+*.gz     binary
+*.dump   binary
+
+# --- GitHub language stats: report this as an app, not a config repo ---
+frontend/package-lock.json linguist-generated=true

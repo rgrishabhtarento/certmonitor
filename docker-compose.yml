@@ -1,0 +1,184 @@
+# CertMonitor - full stack.
+#
+#   docker compose up -d          start everything
+#   docker compose logs -f        follow logs
+#   docker compose ps             service status
+#   docker compose restart worker restart just the worker
+#   docker compose down           stop (volumes are preserved)
+#
+# The API and the worker run the same image with different entrypoint roles,
+# so they can never disagree about check semantics or the schema.
+
+name: certmonitor
+
+services:
+  # ------------------------------------------------------------ database
+  postgres:
+    image: postgres:16-alpine
+    container_name: certmonitor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-certmonitor}
+      POSTGRES_USER: ${POSTGRES_USER:-certmonitor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      # Fail fast on a misconfigured locale rather than silently producing a
+      # cluster with unexpected collation.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      # Named volume: monitoring history must survive `docker compose down`
+      # and any container rebuild.
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-certmonitor} -d ${POSTGRES_DB:-certmonitor}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # Only exposed on loopback, and only so an operator can run psql or take
+    # a backup from the host. Comment this out to close it entirely.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - certmonitor
+    stop_grace_period: 30s
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      # Log anything slower than a second: the statistics queries are the
+      # first thing to degrade as history grows.
+      - -c
+      - log_min_duration_statement=1000
+
+  # --------------------------------------------------------------- redis
+  redis:
+    image: redis:7-alpine
+    container_name: certmonitor-redis
+    restart: unless-stopped
+    # Used for cross-replica login rate limiting and import previews. The
+    # application degrades to in-process equivalents if Redis is absent, so
+    # this service is a hardening measure rather than a hard dependency.
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - certmonitor
+
+  # ----------------------------------------------------------- API layer
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: certmonitor/backend:${IMAGE_TAG:-latest}
+    container_name: certmonitor-backend
+    restart: unless-stopped
+    command: ["api"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certmonitor}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-certmonitor}
+      REDIS_URL: redis://redis:6379/0
+      API_WORKERS: ${API_WORKERS:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - certmonitor
+    # Give uvicorn time to finish in-flight requests on SIGTERM.
+    stop_grace_period: 30s
+
+  # ------------------------------------------------------ monitoring worker
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: certmonitor/backend:${IMAGE_TAG:-latest}
+    container_name: certmonitor-worker
+    restart: unless-stopped
+    command: ["worker"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certmonitor}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-certmonitor}
+      REDIS_URL: redis://redis:6379/0
+      WORKER_ENABLED: "true"
+      # A smaller pool than the API: the worker holds one short transaction
+      # per check, not one per request.
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${WORKER_DB_MAX_OVERFLOW:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # The API applies migrations; the worker waits for the schema in its
+      # entrypoint, so this only orders startup.
+      backend:
+        condition: service_started
+    healthcheck:
+      # The worker exposes no HTTP port. Liveness is the process being up
+      # plus the heartbeat rows the API reports through /health.
+      test: ["CMD-SHELL", "pgrep -f monitor_worker > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - certmonitor
+    # Long enough for in-flight checks to finish and leases to be released.
+    stop_grace_period: 45s
+
+  # ------------------------------------------------------------ frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: certmonitor/frontend:${IMAGE_TAG:-latest}
+    container_name: certmonitor-frontend
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - certmonitor
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  certmonitor:
+    driver: bridge
