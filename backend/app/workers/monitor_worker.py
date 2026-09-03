@@ -57,10 +57,13 @@ def _now() -> datetime:
 
 class MonitorWorker:
     def __init__(self) -> None:
-        self.worker_id = (
-            settings.WORKER_ID
-            or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:6]}"
-        )[:64]
+        # Identity must be STABLE across restarts, or every container recreate
+        # orphans a heartbeat row and /health reports "degraded" until that row
+        # ages out. The hostname is stable for a Compose service with an
+        # explicit `hostname:` and for a Kubernetes pod (its pod name), so a
+        # restart reuses its own row. Scaling past one replica per host needs
+        # an explicit WORKER_ID (in Kubernetes: metadata.name via fieldRef).
+        self.worker_id = (settings.WORKER_ID or socket.gethostname() or "worker")[:64]
         self.concurrency = max(1, settings.WORKER_CONCURRENCY)
         self._semaphore = asyncio.Semaphore(self.concurrency)
         self._shutdown = asyncio.Event()
@@ -119,14 +122,19 @@ class MonitorWorker:
                 await session.rollback()
                 logger.warning("heartbeat_write_failed", error=str(exc))
 
-    async def _retire_dead_workers(self) -> None:
-        """Delete heartbeats belonging to workers that are gone for good.
+    async def _retire_dead_workers(self, *, older_than_seconds: int) -> None:
+        """Delete heartbeats belonging to workers that are gone.
 
-        A worker takes a new identity whenever its container is recreated, so
-        without this the table accumulates one orphan row per rebuild and
-        /health reports "degraded" forever even though the live worker is fine.
+        A live worker rewrites its row every WORKER_HEARTBEAT_SECONDS, so a
+        heartbeat older than the stale window cannot belong to a running
+        process - it is a container that was replaced. Deleting it is safe
+        even if we are wrong: the owner simply recreates the row on its next
+        beat, because _write_heartbeat inserts when the row is missing.
+
+        This is what stops a rebuild from parking /health at "degraded" while
+        an orphan row ages out.
         """
-        cutoff = _now() - timedelta(seconds=settings.WORKER_RETIRE_AFTER_SECONDS)
+        cutoff = _now() - timedelta(seconds=older_than_seconds)
         try:
             async with SessionFactory() as session:
                 result = await session.execute(
@@ -144,16 +152,28 @@ class MonitorWorker:
             logger.warning("worker_retire_failed", error=str(exc))
 
     async def _heartbeat_loop(self) -> None:
-        # Sweep once at startup so a restart immediately clears the row its
-        # predecessor left behind.
-        await self._retire_dead_workers()
+        # Claim our own row first, then clear anything already stale. At this
+        # instant a stale row cannot be a running worker, so this immediately
+        # removes rows left by containers we replaced instead of leaving
+        # /health degraded while they age out.
+        await self._write_heartbeat()
+        await self._retire_dead_workers(
+            older_than_seconds=settings.WORKER_STALE_AFTER_SECONDS
+        )
         cycles = 0
         while not self._shutdown.is_set():
             await self._write_heartbeat()
             cycles += 1
-            # Roughly every 5 minutes at the default 15s heartbeat.
+            # Roughly every 5 minutes at the default 15s heartbeat. Uses a
+            # wider window than the startup sweep so a briefly wedged peer is
+            # given room to recover before its row is removed.
             if cycles % 20 == 0:
-                await self._retire_dead_workers()
+                await self._retire_dead_workers(
+                    older_than_seconds=max(
+                        settings.WORKER_STALE_AFTER_SECONDS * 2,
+                        settings.WORKER_RETIRE_AFTER_SECONDS,
+                    )
+                )
             try:
                 await asyncio.wait_for(
                     self._shutdown.wait(), timeout=settings.WORKER_HEARTBEAT_SECONDS

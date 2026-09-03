@@ -110,11 +110,11 @@ class Settings(BaseSettings):
     # A worker is considered unhealthy by /health if it has not written a
     # heartbeat within this many seconds.
     WORKER_STALE_AFTER_SECONDS: int = 90
-    # A heartbeat older than this belongs to a worker that is gone for good -
-    # a rebuilt or rescheduled container, not a sick one. Such records stop
-    # affecting /health and are pruned by the worker's own sweep, so a single
-    # rebuild cannot pin the status at "degraded" forever.
-    WORKER_RETIRE_AFTER_SECONDS: int = 1800
+    # Beyond this a heartbeat is treated as a retired worker: ignored by
+    # /health and pruned by the worker sweep. Kept just a few multiples of the
+    # stale window - it is how long a genuinely dead worker is still reported,
+    # and 30 minutes made every rebuild look degraded for half an hour.
+    WORKER_RETIRE_AFTER_SECONDS: int = 300
     RETENTION_SWEEP_INTERVAL_SECONDS: int = 3600
 
     # Safety valve: refuse to check hosts that resolve to link-local/loopback

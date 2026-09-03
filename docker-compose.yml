@@ -122,6 +122,11 @@ services:
     image: certmonitor/backend:${IMAGE_TAG:-latest}
     container_name: certmonitor-worker
     restart: unless-stopped
+    # Stable hostname so the worker keeps one identity across restarts.
+    # Without it the container ID becomes the worker id, and every recreate
+    # orphans a heartbeat row. Scaling past one replica needs WORKER_ID set
+    # per replica instead.
+    hostname: certmonitor-worker
     command: ["worker"]
     env_file:
       - .env
