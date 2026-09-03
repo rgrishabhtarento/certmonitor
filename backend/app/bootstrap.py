@@ -120,3 +120,31 @@ async def run(session: AsyncSession) -> dict[str, int | bool]:
     }
     logger.info("bootstrap_completed", **{k: v for k, v in result.items()})
     return result
+
+
+async def main() -> None:
+    """Entrypoint for ``python -m app.bootstrap``.
+
+    Seeding runs as its own step before uvicorn starts rather than only inside
+    the app lifespan. With API_WORKERS > 1 the lifespan runs once per worker
+    process, and the advisory lock means the losing process reports
+    "bootstrap_skipped" and moves on - so if the lock holder failed, nothing
+    got seeded and the instance came up with no admin account. Running it here
+    makes it happen exactly once, and a non-zero exit stops the container
+    instead of serving an unusable API.
+    """
+    from app.core.database import SessionFactory, dispose_engine
+    from app.core.logging import configure_logging
+
+    configure_logging()
+    try:
+        async with SessionFactory() as session:
+            await run(session)
+    finally:
+        await dispose_engine()
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(main())

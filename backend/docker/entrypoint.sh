@@ -101,11 +101,22 @@ run_migrations() {
   log "migrations_applied"
 }
 
+seed_data() {
+  # Runs once, before uvicorn forks its workers. Doing it here rather than
+  # only in the app lifespan means API_WORKERS > 1 cannot leave the instance
+  # unseeded, and a failure stops the container instead of serving an API
+  # with no admin account.
+  log "seeding_data"
+  python -m app.bootstrap
+  log "seed_complete"
+}
+
 # ------------------------------------------------------------------ roles
 case "$ROLE" in
   api)
     wait_for_database
     run_migrations
+    seed_data
     log "starting_api"
     exec uvicorn app.main:app \
       --host "${API_HOST:-0.0.0.0}" \
@@ -128,6 +139,12 @@ case "$ROLE" in
   migrate)
     wait_for_database
     run_migrations
+    ;;
+
+  seed)
+    wait_for_database
+    wait_for_schema
+    seed_data
     ;;
 
   shell)

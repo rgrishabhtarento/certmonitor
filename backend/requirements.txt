@@ -17,7 +17,11 @@ greenlet==3.1.1
 
 # --- Security ---
 passlib[bcrypt]==1.7.4
-bcrypt==4.2.1
+# Pinned below 4.1: passlib 1.7.4 reads bcrypt.__about__.__version__ during
+# backend detection, which bcrypt 4.1 removed. The failure is trapped by
+# passlib so hashing still works, but it logs an AttributeError traceback on
+# every process start. 4.0.1 keeps that attribute and silences the noise.
+bcrypt==4.0.1
 PyJWT==2.10.1
 cryptography==44.0.0
 

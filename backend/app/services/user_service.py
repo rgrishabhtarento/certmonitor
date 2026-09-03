@@ -96,19 +96,29 @@ async def ensure_roles(session: AsyncSession) -> dict[str, Role]:
     }
     for role_name, codes in ROLE_PERMISSIONS.items():
         role = roles.get(role_name)
+        wanted = [existing_permissions[code] for code in sorted(codes)]
+
         if role is None:
             role = Role(
                 name=role_name,
                 description=f"Built-in {role_name} role",
                 is_system=True,
             )
+            # Populate the collection BEFORE adding/flushing. Assigning it on a
+            # pending object initialises it locally; reading `role.permissions`
+            # after a flush would instead emit a lazy SELECT, which raises
+            # MissingGreenlet under asyncio and previously broke first boot on
+            # an empty database.
+            role.permissions = wanted
             session.add(role)
-            await session.flush()
             roles[role_name] = role
-        current = {p.code for p in role.permissions}
-        for code in sorted(codes):
-            if code not in current:
-                role.permissions.append(existing_permissions[code])
+        else:
+            # Loaded eagerly by the selectinload above, so this is in memory.
+            current = {p.code for p in role.permissions}
+            for permission in wanted:
+                if permission.code not in current:
+                    role.permissions.append(permission)
+
     await session.flush()
     return roles
 
