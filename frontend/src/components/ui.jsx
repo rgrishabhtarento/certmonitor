@@ -360,21 +360,39 @@ export function TagInput({ value = [], onChange, suggestions = [], placeholder =
 export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
   const ref = useRef(null)
 
+  // Callers pass `onClose` as an inline arrow, so its identity changes on
+  // every parent render. Holding it in a ref keeps the effect below dependent
+  // on `open` alone - previously each keystroke re-rendered the parent, gave
+  // the effect a "new" onClose, and re-ran it, so focus() pulled the caret out
+  // of the field being typed into and back onto the dialog.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
   useEffect(() => {
     if (!open) return undefined
+
     const onKey = (event) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') onCloseRef.current?.()
     }
     document.addEventListener('keydown', onKey)
+
     // Prevent the page behind the dialog from scrolling.
     const previous = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    ref.current?.focus()
+
+    // Focus the dialog once on open, and only if focus is not already inside
+    // it - so a re-render can never steal the caret from an input.
+    if (!ref.current?.contains(document.activeElement)) {
+      ref.current?.focus()
+    }
+
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = previous
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 
