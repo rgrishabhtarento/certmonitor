@@ -179,7 +179,8 @@ async def resolve_host(
 
 
 # --------------------------------------------------------------- headers
-def _build_headers(target: CheckTarget) -> dict[str, str]:
+def build_headers(target: CheckTarget) -> dict[str, str]:
+    """Assemble request headers, injecting the decrypted credential."""
     headers: dict[str, str] = {
         "User-Agent": target.user_agent,
         "Accept": "*/*",
@@ -256,7 +257,7 @@ async def _run_http_check(target: CheckTarget, outcome: CheckOutcome) -> CheckOu
         request = client.build_request(
             target.http_method.upper(),
             target.url,
-            headers=_build_headers(target),
+            headers=build_headers(target),
             content=target.request_body.encode("utf-8")
             if target.request_body
             else None,

@@ -20,7 +20,7 @@ from app.api.deps import (
     parse_uuid_list,
     split_csv_param,
 )
-from app.core.enums import AuditAction, EndpointStatus, SslStatus
+from app.core.enums import AuditAction, EndpointStatus
 from app.core.logging import get_logger
 from app.models.endpoint import Endpoint, Environment, Tag
 from app.models.incident import Incident
@@ -43,14 +43,15 @@ from app.schemas.endpoint import (
 )
 from app.schemas.monitoring import (
     CheckNowResponse,
+    DiagnosticsResponse,
     MonitoringResultRead,
     SslCertificateRead,
 )
 from app.services import (
     audit_service,
+    diagnostics_service,
     endpoint_service,
     monitoring_service,
-    settings_service,
     stats_service,
 )
 from app.services.endpoint_service import EndpointConflict
@@ -542,6 +543,49 @@ async def check_endpoint_now(
 
 
 # ---------------------------------------------------------------- history
+@router.post(
+    "/{endpoint_id}/diagnose",
+    response_model=DiagnosticsResponse,
+    summary="Diagnose a failing endpoint",
+)
+async def diagnose_endpoint(
+    endpoint_id: uuid.UUID,
+    user: CheckEndpoints,
+    request: Request,
+    session: DbSession,
+) -> DiagnosticsResponse:
+    """Isolate which layer of the request is broken, and say what to do.
+
+    Probes DNS, TCP (per resolved address), TLS and HTTP as separate stages,
+    then combines that with the endpoint's stored history and with what
+    sibling endpoints are doing. The result names the deepest layer that still
+    works, so the fault is localised immediately.
+
+    Requires ``endpoint:check`` because it makes live outbound requests. It
+    writes nothing to the monitoring history, so diagnosing an endpoint never
+    distorts its uptime figures.
+    """
+    endpoint = await _load_endpoint(session, endpoint_id)
+    report = await diagnostics_service.diagnose(session, endpoint)
+
+    await audit_service.record(
+        session,
+        action=AuditAction.ENDPOINT_CHECKED.value,
+        user=user,
+        resource_type="endpoint",
+        resource_id=endpoint.id,
+        resource_name=endpoint.name,
+        details={
+            "diagnostics": True,
+            "verdict": report["verdict"],
+            "deepest_layer_ok": report["deepest_layer_ok"],
+        },
+        request=request,
+    )
+    await session.commit()
+    return DiagnosticsResponse.model_validate(report)
+
+
 @router.get(
     "/{endpoint_id}/history",
     response_model=Page[MonitoringResultRead],

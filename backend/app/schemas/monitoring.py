@@ -357,3 +357,51 @@ class AuditLogRead(ORMModel):
 
 
 CheckNowResponse.model_rebuild()
+
+
+# --------------------------------------------------------------- diagnostics
+class DiagnosticLayer(BaseModel):
+    """One stage of the DNS -> TCP -> TLS -> HTTP chain."""
+
+    layer: str
+    status: str = Field(description="ok | warning | failed | skipped")
+    detail: str
+    elapsed_ms: float | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class DiagnosticFinding(BaseModel):
+    severity: str = Field(description="high | medium | low")
+    title: str
+    detail: str
+    action: str = Field(description="The concrete next step to take.")
+
+
+class DiagnosticsResponse(BaseModel):
+    """Triage for one endpoint.
+
+    ``deepest_layer_ok`` is the single most useful field: it names the last
+    stage that worked, so the fault is localised without reading anything
+    else.
+    """
+
+    endpoint_id: uuid.UUID
+    endpoint_name: str
+    url: str
+    current_status: str
+    generated_at: datetime
+    elapsed_ms: float
+
+    verdict: str
+    summary: str
+    deepest_layer_ok: str | None = None
+
+    layers: list[DiagnosticLayer] = Field(default_factory=list)
+    findings: list[DiagnosticFinding] = Field(default_factory=list)
+    comparisons: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra probes run for contrast, e.g. the site root, or the "
+        "same request with certificate verification disabled.",
+    )
+    history: dict[str, Any] = Field(default_factory=dict)
+    correlation: dict[str, Any] = Field(default_factory=dict)

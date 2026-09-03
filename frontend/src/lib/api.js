@@ -235,7 +235,15 @@ export const endpointsApi = {
   setMonitoring: (id, payload) =>
     api.patch(`/endpoints/${id}/monitoring`, payload).then((r) => r.data),
   check: (id, persist = true) =>
-    api.post(`/endpoints/${id}/check`, null, { params: { persist } }).then((r) => r.data),
+    api
+      .post(`/endpoints/${id}/check`, null, { params: { persist } })
+      .then((r) => r.data),
+  // Runs several live probes back to back, so it needs a longer ceiling than
+  // the client default.
+  diagnose: (id) =>
+    api
+      .post(`/endpoints/${id}/diagnose`, null, { timeout: 90000 })
+      .then((r) => r.data),
   history: (id, params) =>
     api.get(`/endpoints/${id}/history`, { params: cleanParams(params) }).then((r) => r.data),
   stats: (id, window) =>

@@ -8,11 +8,13 @@ import {
   Play,
   RefreshCw,
   ShieldCheck,
+  Stethoscope,
   Trash2,
   Zap,
 } from 'lucide-react'
 import clsx from 'clsx'
 
+import DiagnosticsPanel from '../components/DiagnosticsPanel'
 import EndpointForm from '../components/EndpointForm'
 import {
   ChartFrame,
@@ -101,6 +103,25 @@ export default function EndpointDetail() {
   const [formOpen, setFormOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+
+  const [diagnosing, setDiagnosing] = useState(false)
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [diagnostics, setDiagnostics] = useState(null)
+  const [diagnosticsError, setDiagnosticsError] = useState(null)
+
+  const runDiagnostics = async () => {
+    setDiagnosticsOpen(true)
+    setDiagnosing(true)
+    setDiagnostics(null)
+    setDiagnosticsError(null)
+    try {
+      setDiagnostics(await endpointsApi.diagnose(endpointId))
+    } catch (err) {
+      setDiagnosticsError(err.message)
+    } finally {
+      setDiagnosing(false)
+    }
+  }
 
   // ------------------------------------------------------------- loaders
   const loadEndpoint = useCallback(async () => {
@@ -266,15 +287,31 @@ export default function EndpointDetail() {
         actions={
           <>
             {canCheck ? (
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={runCheck}
-                disabled={checking}
-              >
-                {checking ? <Spinner size={15} /> : <Zap size={15} />}
-                Check now
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={runCheck}
+                  disabled={checking}
+                >
+                  {checking ? <Spinner size={15} /> : <Zap size={15} />}
+                  Check now
+                </button>
+                <button
+                  type="button"
+                  className={clsx(
+                    'btn-secondary',
+                    endpoint.current_status === 'down' &&
+                      'border-red-300 text-red-700 dark:border-red-800 dark:text-red-300',
+                  )}
+                  onClick={runDiagnostics}
+                  disabled={diagnosing}
+                  title="Isolate which layer is failing and what to do about it"
+                >
+                  {diagnosing ? <Spinner size={15} /> : <Stethoscope size={15} />}
+                  Diagnose
+                </button>
+              </>
             ) : null}
             {canWrite ? (
               <>
@@ -957,6 +994,14 @@ export default function EndpointDetail() {
           loadStats()
           loadCertificate()
         }}
+      />
+
+      <DiagnosticsPanel
+        open={diagnosticsOpen}
+        onClose={() => setDiagnosticsOpen(false)}
+        report={diagnostics}
+        loading={diagnosing}
+        error={diagnosticsError}
       />
 
       <ConfirmDialog
