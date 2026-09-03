@@ -14,6 +14,7 @@ import {
 
 import EndpointForm from '../components/EndpointForm'
 import {
+  Clamp,
   ConfirmDialog,
   EmptyState,
   ErrorState,
@@ -514,16 +515,23 @@ export default function Endpoints() {
                         </td>
                       ) : null}
 
-                      <td className="max-w-[18rem]">
-                        <Link
-                          to={`/endpoints/${endpoint.id}`}
-                          className="font-medium text-brand-600 hover:underline dark:text-brand-400"
-                        >
-                          {endpoint.name}
-                        </Link>
-                        <p className="truncate font-mono text-[11px] text-slate-400" title={endpoint.url}>
-                          {endpoint.url}
-                        </p>
+                      <td>
+                        <div className="max-w-[18rem]">
+                          <Clamp width="18rem" title={endpoint.name}>
+                            <Link
+                              to={`/endpoints/${endpoint.id}`}
+                              className="font-medium text-brand-600 hover:underline dark:text-brand-400"
+                            >
+                              {endpoint.name}
+                            </Link>
+                          </Clamp>
+                          <p
+                            className="truncate font-mono text-[11px] text-slate-400"
+                            title={endpoint.url}
+                          >
+                            {endpoint.url}
+                          </p>
+                        </div>
                       </td>
 
                       <td>

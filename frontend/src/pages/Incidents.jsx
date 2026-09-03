@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { CheckCircle2, RefreshCw, Zap } from 'lucide-react'
+import { CheckCircle2, RefreshCw } from 'lucide-react'
 
 import {
-  Card,
+  Clamp,
   EmptyState,
   ErrorState,
   LoadingBlock,
@@ -226,16 +226,23 @@ export default function Incidents() {
                   {items.map((incident) => (
                     <tr key={incident.id}>
                       <td className="tnum text-slate-400">#{incident.id}</td>
-                      <td className="max-w-[16rem]">
-                        <Link
-                          to={`/endpoints/${incident.endpoint_id}`}
-                          className="font-medium text-brand-600 hover:underline dark:text-brand-400"
-                        >
-                          {incident.endpoint?.name || 'Endpoint'}
-                        </Link>
-                        <p className="truncate text-[11px] text-slate-400">
-                          {incident.endpoint?.url}
-                        </p>
+                      <td>
+                        <div className="max-w-[16rem]">
+                          <Clamp width="16rem" title={incident.endpoint?.name}>
+                            <Link
+                              to={`/endpoints/${incident.endpoint_id}`}
+                              className="font-medium text-brand-600 hover:underline dark:text-brand-400"
+                            >
+                              {incident.endpoint?.name || 'Endpoint'}
+                            </Link>
+                          </Clamp>
+                          <p
+                            className="truncate text-[11px] text-slate-400"
+                            title={incident.endpoint?.url}
+                          >
+                            {incident.endpoint?.url}
+                          </p>
+                        </div>
                       </td>
                       <td>
                         <StatusBadge status={incident.status === 'open' ? 'down' : 'up'} />

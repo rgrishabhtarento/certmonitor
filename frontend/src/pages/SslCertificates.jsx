@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Download, RefreshCw, ShieldCheck } from 'lucide-react'
 
 import {
+  Clamp,
   EmptyState,
   ErrorState,
   LoadingBlock,
@@ -369,16 +370,23 @@ export default function SslCertificates() {
                 <tbody>
                   {items.map((row) => (
                     <tr key={row.endpoint_id}>
-                      <td className="max-w-[16rem]">
-                        <Link
-                          to={`/endpoints/${row.endpoint_id}`}
-                          className="font-medium text-brand-600 hover:underline dark:text-brand-400"
-                        >
-                          {row.endpoint_name}
-                        </Link>
-                        <p className="truncate font-mono text-[11px] text-slate-400" title={row.url}>
-                          {row.hostname}
-                        </p>
+                      <td>
+                        <div className="max-w-[16rem]">
+                          <Clamp width="16rem" title={row.endpoint_name}>
+                            <Link
+                              to={`/endpoints/${row.endpoint_id}`}
+                              className="font-medium text-brand-600 hover:underline dark:text-brand-400"
+                            >
+                              {row.endpoint_name}
+                            </Link>
+                          </Clamp>
+                          <p
+                            className="truncate font-mono text-[11px] text-slate-400"
+                            title={row.url}
+                          >
+                            {row.hostname}
+                          </p>
+                        </div>
                         {row.tags?.length ? (
                           <div className="mt-0.5 flex flex-wrap gap-1">
                             {row.tags.slice(0, 2).map((name) => (

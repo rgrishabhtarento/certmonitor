@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { BellOff, Check, RefreshCw, Trash2 } from 'lucide-react'
 
 import {
+  Clamp,
   EmptyState,
   ErrorState,
   LoadingBlock,
@@ -300,29 +301,37 @@ export default function Alerts() {
                       <td className="whitespace-nowrap text-xs text-slate-600 dark:text-slate-300">
                         {humanise(alert.alert_type, ALERT_TYPE_LABELS)}
                       </td>
-                      <td className="max-w-[22rem]">
-                        <p className="font-medium text-slate-800 dark:text-slate-100">
-                          {alert.title}
-                        </p>
-                        {alert.message ? (
-                          <p className="text-xs text-slate-500 dark:text-slate-400">
-                            {alert.message}
+                      <td>
+                        {/* Titles and messages contain long unbreakable URLs
+                            and hostnames, so this cell wraps rather than
+                            clamps - break-words stops the URL from pushing
+                            the column wide. */}
+                        <div className="max-w-[30rem] break-words">
+                          <p className="font-medium text-slate-800 dark:text-slate-100">
+                            {alert.title}
                           </p>
-                        ) : null}
-                        {alert.is_acknowledged ? (
-                          <p className="mt-0.5 text-[11px] text-slate-400">
-                            Acknowledged {formatRelative(alert.acknowledged_at)}
-                          </p>
-                        ) : null}
+                          {alert.message ? (
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {alert.message}
+                            </p>
+                          ) : null}
+                          {alert.is_acknowledged ? (
+                            <p className="mt-0.5 text-[11px] text-slate-400">
+                              Acknowledged {formatRelative(alert.acknowledged_at)}
+                            </p>
+                          ) : null}
+                        </div>
                       </td>
-                      <td className="max-w-[12rem]">
+                      <td>
                         {alert.endpoint_id ? (
-                          <Link
-                            to={`/endpoints/${alert.endpoint_id}`}
-                            className="truncate text-brand-600 hover:underline dark:text-brand-400"
-                          >
-                            {alert.endpoint_name}
-                          </Link>
+                          <Clamp width="13rem" title={alert.endpoint_name}>
+                            <Link
+                              to={`/endpoints/${alert.endpoint_id}`}
+                              className="text-brand-600 hover:underline dark:text-brand-400"
+                            >
+                              {alert.endpoint_name}
+                            </Link>
+                          </Clamp>
                         ) : (
                           <span className="text-slate-400">—</span>
                         )}

@@ -581,6 +581,33 @@ export function Metric({ label, value, sub, tone }) {
   )
 }
 
+/**
+ * Clamp long text inside a table cell.
+ *
+ * Two things that look like they should work, do not:
+ *
+ *  - `max-w-*` on a `<td>` is effectively advisory under the default
+ *    `table-layout: auto` - the browser sizes columns from content, so an
+ *    unbreakable 38-character hostname simply overflows into the next column.
+ *  - `truncate` on a `<Link>` does nothing, because `overflow` and
+ *    `text-overflow` need a block or inline-block box and an `<a>` is inline.
+ *
+ * So the width and the clipping both have to live on a real block box inside
+ * the cell. That is what this is.
+ */
+export function Clamp({ width = '16rem', title, className, children }) {
+  return (
+    <div
+      className={clsx('block truncate', className)}
+      style={{ maxWidth: width }}
+      // Native tooltip, so clipped text stays readable on hover.
+      title={typeof title === 'string' ? title : undefined}
+    >
+      {children}
+    </div>
+  )
+}
+
 /** Definition-list row for the many detail panels. */
 export function DetailRow({ label, children, mono = false }) {
   return (
