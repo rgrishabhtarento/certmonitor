@@ -15,6 +15,8 @@ const EndpointDetail = lazy(() => import('./pages/EndpointDetail'))
 const SslCertificates = lazy(() => import('./pages/SslCertificates'))
 const Incidents = lazy(() => import('./pages/Incidents'))
 const Alerts = lazy(() => import('./pages/Alerts'))
+const Changes = lazy(() => import('./pages/Changes'))
+const ChangeDetail = lazy(() => import('./pages/ChangeDetail'))
 const TagsPage = lazy(() => import('./pages/TagsPage'))
 const EnvironmentsPage = lazy(() => import('./pages/EnvironmentsPage'))
 const ImportExport = lazy(() => import('./pages/ImportExport'))
@@ -134,6 +136,26 @@ export default function App() {
             <Suspense fallback={<RouteFallback />}>
               <Alerts />
             </Suspense>
+          }
+        />
+        <Route
+          path="changes"
+          element={
+            <RequirePermission permission="change:read">
+              <Suspense fallback={<RouteFallback />}>
+                <Changes />
+              </Suspense>
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="changes/:changeId"
+          element={
+            <RequirePermission permission="change:read">
+              <Suspense fallback={<RouteFallback />}>
+                <ChangeDetail />
+              </Suspense>
+            </RequirePermission>
           }
         />
         <Route

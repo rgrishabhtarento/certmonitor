@@ -9,6 +9,12 @@ e-mail. Everything on the dashboard comes from checks the monitoring worker
 actually executed — there is no mock or seeded monitoring data anywhere in the
 application.
 
+It also carries a deliberately small [change management](#14-change-management)
+workflow — request, approve, deploy — whose point is that starting a deployment
+**pauses the monitoring for exactly the endpoints it touches**, so a planned
+outage never opens an incident, never pages anyone, and never counts against
+uptime.
+
 ```
 docker compose up -d
 ```
@@ -32,15 +38,16 @@ Then open <http://localhost:8080> and sign in.
 11. [How monitoring actually works](#11-how-monitoring-actually-works)
 12. [Alerts and notifications](#12-alerts-and-notifications)
 13. [User management and RBAC](#13-user-management-and-rbac)
-14. [API reference](#14-api-reference)
-15. [Local development](#15-local-development)
-16. [Testing](#16-testing)
-17. [Backup and recovery](#17-backup-and-recovery)
-18. [Production deployment](#18-production-deployment)
-19. [Kubernetes considerations](#19-kubernetes-considerations)
-20. [Troubleshooting](#20-troubleshooting)
-21. [Security notes](#21-security-notes)
-22. [Project structure](#22-project-structure)
+14. [Change management](#14-change-management)
+15. [API reference](#15-api-reference)
+16. [Local development](#16-local-development)
+17. [Testing](#17-testing)
+18. [Backup and recovery](#18-backup-and-recovery)
+19. [Production deployment](#19-production-deployment)
+20. [Kubernetes considerations](#20-kubernetes-considerations)
+21. [Troubleshooting](#21-troubleshooting)
+22. [Security notes](#22-security-notes)
+23. [Project structure](#23-project-structure)
 
 ---
 
@@ -252,7 +259,8 @@ docker compose exec backend alembic downgrade -1
 `users`, `roles`, `permissions`, `role_permissions`, `endpoints`,
 `endpoint_tags`, `tags`, `environments`, `monitoring_results`,
 `ssl_certificates`, `incidents`, `alerts`, `notification_channels`,
-`audit_logs`, `system_settings`, `worker_heartbeats`.
+`audit_logs`, `system_settings`, `worker_heartbeats`, `changes`,
+`change_endpoints`, `change_comments`, `change_activity`.
 
 Indexes worth knowing about:
 
@@ -604,19 +612,24 @@ parts (`target_host`, `port`, `recipient_count`).
 
 ## 13. User management and RBAC
 
-Two built-in roles:
+Three built-in roles. **Approver** exists only for change management: it is a
+viewer who can additionally approve or reject a change, which lets you separate
+"who asks" from "who says yes" without handing out admin.
 
-| | Admin | Viewer |
-|---|:-:|:-:|
-| View dashboards, endpoints, SSL, history, incidents | ✅ | ✅ |
-| Export configuration | ✅ | ✅ |
-| Read settings | ✅ | ✅ |
-| Add / edit / delete endpoints | ✅ | ❌ |
-| Run manual checks | ✅ | ❌ |
-| Import endpoints | ✅ | ❌ |
-| Manage users | ✅ | ❌ |
-| Change configuration, alerts, channels | ✅ | ❌ |
-| Read audit logs | ✅ | ❌ |
+| | Admin | Approver | Viewer |
+|---|:-:|:-:|:-:|
+| View dashboards, endpoints, SSL, history, incidents | ✅ | ✅ | ✅ |
+| Export configuration | ✅ | ✅ | ✅ |
+| Read settings | ✅ | ✅ | ✅ |
+| Raise and comment on change requests | ✅ | ✅ | ✅ |
+| Approve / reject a change | ✅ | ✅ | ❌ |
+| Start, complete or fail a deployment | ✅ | ❌ | ❌ |
+| Add / edit / delete endpoints | ✅ | ❌ | ❌ |
+| Run manual checks | ✅ | ❌ | ❌ |
+| Import endpoints | ✅ | ❌ | ❌ |
+| Manage users | ✅ | ❌ | ❌ |
+| Change configuration, alerts, channels | ✅ | ❌ | ❌ |
+| Read audit logs | ✅ | ❌ | ❌ |
 
 Admins can create, enable, disable and delete users, reset passwords, change
 roles, clear brute-force lockouts, and see last login with source IP.
@@ -653,7 +666,108 @@ credential-shaped value is ever written.
 
 ---
 
-## 14. API reference
+## 14. Change management
+
+Deployments are the single largest source of false alerts in a monitoring tool:
+the service goes down because you took it down, an incident opens, everyone is
+paged, and the uptime figure for the month is wrong. **Change Management** ties
+the deployment to the monitoring so that does not happen.
+
+### The workflow
+
+```
+Draft ──submit──▶ Pending approval ──approve──▶ Approved ──start──▶ Deploying ──▶ Completed
+  │                      │                          │                  │
+  │                      └────reject───▶ Rejected   │                  └──▶ Failed
+  └──────────────────── cancel ─────────────────────┴──▶ Cancelled
+```
+
+Six states, no more. A change targeting an environment that does **not** require
+approval skips straight from *Draft* to *Approved* on submit, so low-risk work
+is not slowed down by ceremony.
+
+### What happens to monitoring
+
+| Transition | Effect on monitoring |
+|---|---|
+| **Start deployment** | Every affected endpoint is paused, its status set to `Paused`, its failure streak cleared, and `pause_reason` set to `Deployment CHG-YYYY-NNNN`. |
+| While deploying | The worker's claim query skips paused endpoints, so **no checks run at all** — no results, no incidents, no alerts, and the window never lands in the uptime figures. |
+| **Complete** / **Fail** | Only the endpoints *this* change paused are resumed (an endpoint you had already paused by hand stays paused), and each is checked immediately. |
+
+That last point is the one worth understanding: the pause is not a filter
+applied after the fact, it stops the check being scheduled. There is nothing to
+suppress downstream because nothing is produced.
+
+The immediate post-deployment check is the payoff — you see whether the
+deployment actually worked within seconds of marking it complete, rather than at
+the next scheduled interval. Its result is stored on the change and shown as
+**Post-deployment health check**, including HTTP status, response time and
+certificate state per endpoint.
+
+### Guards
+
+- **One deployment at a time** per application + environment. A second `start`
+  is refused and names the change already running.
+- **A forgotten deployment cannot silence an endpoint forever.** Anything paused
+  longer than `change_max_pause_minutes` (default 240) is flagged on the change
+  dashboard as *running over*.
+- **Approval is server-enforced**, not a UI convention — `start-deployment`
+  refuses anything that is not `approved`.
+- The **deployer is taken from the authenticated session**, never from the
+  request body.
+- Every transition writes both a change-activity entry and an audit-log entry.
+
+### Settings
+
+Under **Settings → Change management**:
+
+| Key | Default | What it does |
+|---|---|---|
+| `change_approval_environments` | `production` | Changes targeting these environments need approval first. Comma-separated. |
+| `change_health_check_on_resume` | `true` | Check the affected endpoints the moment monitoring resumes. |
+| `change_max_pause_minutes` | `240` | Flag deployments whose pause runs longer than this. |
+
+### Using it
+
+1. **New change** — title, application, environment, risk, description, planned
+   date/time and duration, plus the endpoints the deployment touches. Rollback
+   plan optional but recommended.
+2. **Submit.** Production goes to *Pending approval*; anything else is approved
+   automatically.
+3. An approver opens **Pending approval** and approves or rejects with a reason.
+4. When you actually deploy, hit **Start deployment**. Monitoring pauses.
+5. **Complete deployment** (with notes) or **Mark failed** (with a reason).
+   Monitoring resumes and is checked immediately.
+
+A paused endpoint shows *why* on the Endpoints table and its detail page, with a
+link straight to the change that paused it.
+
+### Endpoints
+
+```
+GET    /api/changes                        list, with search + status/application/environment/risk/date filters
+GET    /api/changes/dashboard              counts, active, upcoming, overrunning
+GET    /api/changes/options                statuses, risks, known applications
+POST   /api/changes                        create (draft)
+GET    /api/changes/{id}                   detail incl. endpoints, comments, activity, permissions
+PUT    /api/changes/{id}                   edit (draft or rejected only)
+POST   /api/changes/{id}/submit            draft -> pending approval (or approved)
+POST   /api/changes/{id}/approve
+POST   /api/changes/{id}/reject            requires a reason
+POST   /api/changes/{id}/cancel
+POST   /api/changes/{id}/start-deployment  pauses monitoring
+POST   /api/changes/{id}/complete          resumes monitoring + health check
+POST   /api/changes/{id}/fail              requires a reason; resumes monitoring + health check
+POST   /api/changes/{id}/comments
+```
+
+`GET /api/changes/{id}` returns server-computed `can_edit`, `can_submit`,
+`can_approve`, `can_deploy`, `can_finish`, `can_cancel` and `can_comment`, so the
+UI never re-derives the workflow rules and cannot drift from the API.
+
+---
+
+## 15. API reference
 
 Interactive docs: **<http://localhost:8080/api/docs>** (Swagger UI) and
 `/api/redoc`. Machine-readable: `/api/openapi.json`.
@@ -728,7 +842,7 @@ response to the full detail in the log; exception text is never echoed.
 
 ---
 
-## 15. Local development
+## 16. Local development
 
 ### Backend
 
@@ -766,7 +880,7 @@ Point it elsewhere with `VITE_API_TARGET=http://localhost:8000 npm run dev`.
 
 ---
 
-## 16. Testing
+## 17. Testing
 
 ```bash
 cd backend
@@ -797,6 +911,7 @@ and the JSON/BigInteger columns carry SQLite variants for exactly this reason.
 | `test_endpoints_api.py` | CRUD, validation, duplicates, credential handling, filters, sorting, pagination, bulk actions |
 | `test_import_export.py` | Valid/invalid CSV, missing fields, duplicates, aliases, Excel, idempotent re-import, credential-free export |
 | `test_health_and_settings.py` | Probes, security headers, settings validation, user management invariants, channels, OpenAPI completeness |
+| `test_changes.py` | The change workflow and its effect on monitoring: approval routing, self-approval refused, pause on deploy, resume on complete/fail, an already-paused endpoint left alone, concurrent-deployment conflict, activity timeline |
 
 HTTP responses are stubbed with `respx`, and certificates are generated
 in-process with `cryptography`, so the valid/expiring/expired/invalid cases are
@@ -804,7 +919,7 @@ real X.509 material going through the same parsing path a live handshake uses.
 
 ---
 
-## 17. Backup and recovery
+## 18. Backup and recovery
 
 ### What to back up
 
@@ -883,7 +998,7 @@ docker compose up -d
 
 ---
 
-## 18. Production deployment
+## 19. Production deployment
 
 **Before going live**
 
@@ -949,7 +1064,7 @@ replicas beyond that.
 
 ---
 
-## 19. Kubernetes considerations
+## 20. Kubernetes considerations
 
 The design already assumes it. Notes for a chart:
 
@@ -1016,7 +1131,7 @@ worker can finish in-flight checks and release its leases.
 
 ---
 
-## 20. Troubleshooting
+## 21. Troubleshooting
 
 **Everything: check the logs first.**
 
@@ -1127,7 +1242,7 @@ severity/event/environment/tag filters.
 
 ---
 
-## 21. Security notes
+## 22. Security notes
 
 - Passwords: bcrypt cost 12. Never logged, never returned, never exported.
 - Endpoint credentials and channel configs: Fernet-encrypted at rest,
@@ -1156,21 +1271,22 @@ severity/event/environment/tag filters.
 
 ---
 
-## 22. Project structure
+## 23. Project structure
 
 ```
 certmonitor/
 ├── backend/
 │   ├── alembic/
 │   │   ├── env.py
-│   │   └── versions/0001_initial_schema.py   handwritten initial migration
+│   │   └── versions/                     0001 initial schema,
+│   │                                     0002 change management
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── deps.py                       auth, RBAC, pagination
 │   │   │   ├── health.py                     /health /ready /live /api/workers
 │   │   │   └── v1/                           auth, endpoints, dashboard,
 │   │   │                                     incidents, taxonomy, users,
-│   │   │                                     settings, importexport
+│   │   │                                     settings, importexport, changes
 │   │   ├── core/                             config, database, security,
 │   │   │                                     logging, enums, ratelimit
 │   │   ├── models/                           SQLAlchemy models
@@ -1182,7 +1298,8 @@ certmonitor/
 │   │   ├── schemas/                          Pydantic request/response models
 │   │   ├── services/                         monitoring, stats, endpoints,
 │   │   │                                     users, alerts, notifications,
-│   │   │                                     import/export, retention, settings
+│   │   │                                     import/export, retention, settings,
+│   │   │                                     diagnostics, changes
 │   │   ├── workers/monitor_worker.py         the monitoring process
 │   │   ├── bootstrap.py                      first-boot seeding
 │   │   └── main.py                           app factory, middleware, handlers
@@ -1194,11 +1311,12 @@ certmonitor/
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── components/                       ui, charts, EndpointForm
+│   │   ├── components/                       ui, charts, EndpointForm,
+│   │   │                                     DiagnosticsPanel, ChangeForm
 │   │   ├── hooks/                            useAuth, useToast
 │   │   ├── layouts/AppLayout.jsx
 │   │   ├── lib/                              api client, formatters
-│   │   ├── pages/                            14 screens
+│   │   ├── pages/                            17 screens
 │   │   ├── App.jsx
 │   │   └── main.jsx
 │   ├── Dockerfile

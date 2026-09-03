@@ -413,6 +413,12 @@ async def update_endpoint(
         if field in payload and payload[field] is not None:
             setattr(endpoint, field, bool(payload[field]))
 
+    # A manual resume clears any deployment pause note, so the row never claims
+    # to be paused by a change that has since let go of it.
+    if not endpoint.is_paused:
+        endpoint.pause_reason = None
+        endpoint.paused_by_change_id = None
+
     if "ssl_monitoring_enabled" in payload and payload["ssl_monitoring_enabled"] is not None:
         endpoint.ssl_monitoring_enabled = (
             bool(payload["ssl_monitoring_enabled"]) and endpoint.protocol == "https"

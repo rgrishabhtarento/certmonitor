@@ -536,6 +536,14 @@ export default function Endpoints() {
 
                       <td>
                         <StatusBadge status={endpoint.current_status} pulse />
+                        {endpoint.is_paused && endpoint.pause_reason ? (
+                          <p
+                            className="max-w-[14rem] truncate text-[11px] text-amber-600 dark:text-amber-400"
+                            title={endpoint.pause_reason}
+                          >
+                            {endpoint.pause_reason}
+                          </p>
+                        ) : null}
                         {endpoint.consecutive_failures > 0 &&
                         endpoint.current_status === 'down' ? (
                           <p className="tnum mt-0.5 text-[11px] text-red-500">

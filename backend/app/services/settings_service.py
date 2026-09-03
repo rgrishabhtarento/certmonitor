@@ -215,6 +215,42 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         max_value=100,
     ),
     SettingSpec(
+        key="change_approval_environments",
+        value_type="json",
+        default=["production"],
+        category="changes",
+        label="Environments that require approval",
+        description=(
+            "A change targeting one of these must be approved before it can be "
+            "deployed. Others can be deployed straight from draft."
+        ),
+    ),
+    SettingSpec(
+        key="change_health_check_on_resume",
+        value_type="bool",
+        default=True,
+        category="changes",
+        label="Health-check after a deployment ends",
+        description=(
+            "Run an immediate check on the affected endpoints as soon as "
+            "monitoring resumes, instead of waiting for the next scheduled one."
+        ),
+    ),
+    SettingSpec(
+        key="change_max_pause_minutes",
+        value_type="int",
+        default=240,
+        category="changes",
+        label="Maximum deployment pause (minutes)",
+        description=(
+            "A safety net: monitoring paused by a deployment for longer than "
+            "this is flagged, so a forgotten deployment cannot silence an "
+            "endpoint indefinitely."
+        ),
+        min_value=5,
+        max_value=1440,
+    ),
+    SettingSpec(
         key="allowed_intervals",
         value_type="json",
         default=_INTERVAL_CHOICES,

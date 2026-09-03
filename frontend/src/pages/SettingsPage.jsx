@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bell,
+  ClipboardList,
   Database,
   Plus,
   RotateCcw,
@@ -34,6 +35,7 @@ const CATEGORY_META = {
   monitoring: { label: 'Monitoring', icon: SlidersHorizontal },
   ssl: { label: 'SSL certificates', icon: ShieldCheck },
   alerting: { label: 'Alerting', icon: Bell },
+  changes: { label: 'Change management', icon: ClipboardList },
   retention: { label: 'Data retention', icon: Database },
   general: { label: 'General', icon: Server },
 }
@@ -169,6 +171,30 @@ export default function SettingsPage() {
                   .split(',')
                   .map((part) => parseInt(part.trim(), 10))
                   .filter((n) => Number.isFinite(n)),
+              )
+            }
+          />
+        </Field>
+      )
+    }
+
+    // A list of environment names, edited as comma-separated text but stored
+    // as a list - the API rejects a bare string here.
+    if (setting.key === 'change_approval_environments') {
+      return (
+        <Field label={setting.label} hint={setting.description}>
+          <input
+            className={clsx('input', dirty && 'ring-1 ring-brand-400')}
+            placeholder="production, staging"
+            value={Array.isArray(value) ? value.join(', ') : String(value ?? '')}
+            disabled={!canWrite || !setting.is_editable}
+            onChange={(event) =>
+              setValue(
+                setting.key,
+                event.target.value
+                  .split(',')
+                  .map((part) => part.trim())
+                  .filter(Boolean),
               )
             }
           />

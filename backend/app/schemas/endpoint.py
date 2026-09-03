@@ -324,6 +324,10 @@ class EndpointListItem(ORMModel):
 
     monitoring_enabled: bool
     is_paused: bool
+    # Populated when a deployment paused this endpoint, e.g.
+    # "Deployment CHG-2026-0001" - so a paused row explains itself.
+    pause_reason: str | None = None
+    paused_by_change_id: int | None = None
     interval_seconds: int
     timeout_seconds: int
 

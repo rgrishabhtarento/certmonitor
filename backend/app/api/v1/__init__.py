@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     auth,
+    changes,
     dashboard,
     endpoints,
     importexport,
@@ -22,6 +23,7 @@ api_router.include_router(auth.router)
 api_router.include_router(endpoints.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(incidents.router)
+api_router.include_router(changes.router)
 api_router.include_router(taxonomy.router)
 api_router.include_router(users.router)
 api_router.include_router(settings_routes.router)

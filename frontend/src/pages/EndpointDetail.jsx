@@ -400,6 +400,23 @@ export default function EndpointDetail() {
           />
         </div>
 
+        {endpoint.is_paused && endpoint.pause_reason ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            <span>
+              <span className="font-medium">Monitoring paused:</span>{' '}
+              {endpoint.pause_reason}
+            </span>
+            {endpoint.paused_by_change_id ? (
+              <Link
+                to={`/changes/${endpoint.paused_by_change_id}`}
+                className="font-medium underline"
+              >
+                View change
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
+
         {endpoint.last_error ? (
           <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200">
             <span className="font-medium">Last error:</span> {endpoint.last_error}

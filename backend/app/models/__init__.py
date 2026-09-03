@@ -6,6 +6,12 @@ is what Alembic's autogenerate and the test fixtures rely on.
 
 from app.models.alert import Alert, NotificationChannel
 from app.models.base import Base
+from app.models.change import (
+    Change,
+    ChangeActivity,
+    ChangeComment,
+    change_endpoints,
+)
 from app.models.endpoint import Endpoint, Environment, Tag, endpoint_tags
 from app.models.incident import Incident
 from app.models.monitoring import MonitoringResult, SslCertificate, WorkerHeartbeat
@@ -16,6 +22,9 @@ __all__ = [
     "Alert",
     "AuditLog",
     "Base",
+    "Change",
+    "ChangeActivity",
+    "ChangeComment",
     "Endpoint",
     "Environment",
     "Incident",
@@ -28,6 +37,7 @@ __all__ = [
     "Tag",
     "User",
     "WorkerHeartbeat",
+    "change_endpoints",
     "endpoint_tags",
     "role_permissions",
 ]

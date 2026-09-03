@@ -281,6 +281,38 @@ export const alertsApi = {
   remove: (id) => api.delete(`/alerts/${id}`).then((r) => r.data),
 }
 
+export const changesApi = {
+  list: (params) =>
+    api.get('/changes', { params: cleanParams(params) }).then((r) => r.data),
+  dashboard: () => api.get('/changes/dashboard').then((r) => r.data),
+  options: () => api.get('/changes/options').then((r) => r.data),
+  get: (id) => api.get(`/changes/${id}`).then((r) => r.data),
+  create: (payload) => api.post('/changes', payload).then((r) => r.data),
+  update: (id, payload) => api.put(`/changes/${id}`, payload).then((r) => r.data),
+  submit: (id) => api.post(`/changes/${id}/submit`).then((r) => r.data),
+  approve: (id, comment) =>
+    api.post(`/changes/${id}/approve`, { comment }).then((r) => r.data),
+  reject: (id, reason) =>
+    api.post(`/changes/${id}/reject`, { reason }).then((r) => r.data),
+  cancel: (id, reason) =>
+    api.post(`/changes/${id}/cancel`, { reason }).then((r) => r.data),
+  // These pause/resume monitoring and run a health check, so they can take
+  // longer than a normal write.
+  startDeployment: (id) =>
+    api.post(`/changes/${id}/start-deployment`, null, { timeout: 90000 })
+      .then((r) => r.data),
+  complete: (id, deployment_notes) =>
+    api
+      .post(`/changes/${id}/complete`, { deployment_notes }, { timeout: 120000 })
+      .then((r) => r.data),
+  fail: (id, reason, deployment_notes) =>
+    api
+      .post(`/changes/${id}/fail`, { reason, deployment_notes }, { timeout: 120000 })
+      .then((r) => r.data),
+  comment: (id, body) =>
+    api.post(`/changes/${id}/comments`, { body }).then((r) => r.data),
+}
+
 export const taxonomyApi = {
   tags: () => api.get('/tags').then((r) => r.data),
   createTag: (payload) => api.post('/tags', payload).then((r) => r.data),

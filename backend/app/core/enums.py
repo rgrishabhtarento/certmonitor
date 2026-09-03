@@ -12,6 +12,7 @@ from enum import StrEnum
 
 class RoleName(StrEnum):
     ADMIN = "admin"
+    APPROVER = "approver"
     VIEWER = "viewer"
 
 
@@ -35,11 +36,39 @@ class Permission(StrEnum):
     TAG_WRITE = "tag:write"
     ENVIRONMENT_WRITE = "environment:write"
     NOTIFICATION_WRITE = "notification:write"
+    # --- change management ---
+    CHANGE_READ = "change:read"
+    CHANGE_WRITE = "change:write"
+    CHANGE_APPROVE = "change:approve"
+    CHANGE_DEPLOY = "change:deploy"
+    CHANGE_CANCEL = "change:cancel"
+    CHANGE_COMMENT = "change:comment"
 
+
+# Everyone who can see a change can also raise one and comment on it - the
+# change record is the team's shared conversation, so gating comments behind a
+# role would just push the discussion into chat.
+_CHANGE_BASE = {
+    Permission.CHANGE_READ.value,
+    Permission.CHANGE_WRITE.value,
+    Permission.CHANGE_COMMENT.value,
+}
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     RoleName.ADMIN: {p.value for p in Permission},
-    RoleName.VIEWER: {
+    # Approves changes and sees the monitoring context needed to judge them,
+    # but cannot deploy or alter monitoring configuration.
+    RoleName.APPROVER: _CHANGE_BASE
+    | {
+        Permission.CHANGE_APPROVE.value,
+        Permission.ENDPOINT_READ.value,
+        Permission.ENDPOINT_EXPORT.value,
+        Permission.ALERT_READ.value,
+        Permission.INCIDENT_READ.value,
+        Permission.SETTINGS_READ.value,
+    },
+    RoleName.VIEWER: _CHANGE_BASE
+    | {
         Permission.ENDPOINT_READ.value,
         Permission.ENDPOINT_EXPORT.value,
         Permission.ALERT_READ.value,
@@ -171,3 +200,65 @@ class AuditAction(StrEnum):
     NOTIFICATION_CHANNEL_DELETED = "notification_channel_deleted"
     ALERT_ACKNOWLEDGED = "alert_acknowledged"
     INCIDENT_UPDATED = "incident_updated"
+    CHANGE_CREATED = "change_created"
+    CHANGE_UPDATED = "change_updated"
+    CHANGE_SUBMITTED = "change_submitted"
+    CHANGE_APPROVED = "change_approved"
+    CHANGE_REJECTED = "change_rejected"
+    CHANGE_CANCELLED = "change_cancelled"
+    CHANGE_COMMENTED = "change_commented"
+    DEPLOYMENT_STARTED = "deployment_started"
+    DEPLOYMENT_COMPLETED = "deployment_completed"
+    DEPLOYMENT_FAILED = "deployment_failed"
+    MONITORING_PAUSED = "monitoring_paused"
+    MONITORING_RESUMED = "monitoring_resumed"
+
+
+class ChangeStatus(StrEnum):
+    """Deliberately short. Every extra state is one more thing a small team
+    has to remember, and none of these can be skipped."""
+
+    DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    DEPLOYMENT_IN_PROGRESS = "deployment_in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+# States in which a change still owns its endpoints' monitoring pause.
+ACTIVE_DEPLOYMENT_STATUSES = (ChangeStatus.DEPLOYMENT_IN_PROGRESS.value,)
+
+# States from which nothing further can happen.
+TERMINAL_CHANGE_STATUSES = (
+    ChangeStatus.COMPLETED.value,
+    ChangeStatus.FAILED.value,
+    ChangeStatus.CANCELLED.value,
+    ChangeStatus.REJECTED.value,
+)
+
+
+class ChangeRisk(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class ChangeAction(StrEnum):
+    """Entries in a change's activity timeline."""
+
+    CREATED = "created"
+    UPDATED = "updated"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    DEPLOYMENT_STARTED = "deployment_started"
+    MONITORING_PAUSED = "monitoring_paused"
+    DEPLOYMENT_COMPLETED = "deployment_completed"
+    DEPLOYMENT_FAILED = "deployment_failed"
+    MONITORING_RESUMED = "monitoring_resumed"
+    HEALTH_CHECK = "health_check"
+    CANCELLED = "cancelled"
+    COMMENTED = "commented"

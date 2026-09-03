@@ -22,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.enums import AuthType, CheckType, EndpointStatus, SslStatus
 from app.models.base import (
     Base,
+    BigIntType,
     JSONType,
     TimestampMixin,
     TimestampTZ,
@@ -129,6 +130,13 @@ class Endpoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=True
     )
     is_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Why monitoring is paused, and which change owns the pause. A deployment
+    # pause must only ever be lifted by the change that applied it, so an
+    # operator's own manual pause is never silently undone.
+    pause_reason: Mapped[str | None] = mapped_column(String(255))
+    paused_by_change_id: Mapped[int | None] = mapped_column(
+        BigIntType, ForeignKey("changes.id", ondelete="SET NULL"), index=True
+    )
     interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
 
