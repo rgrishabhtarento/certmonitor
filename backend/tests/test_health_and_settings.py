@@ -626,9 +626,15 @@ class TestHealthPathDiscoverySettings:
 class TestSelfMonitoring:
     """InfraSight measuring its own services.
 
-    The rule worth protecting: it reports what it can actually see and names
-    what it cannot. A resource page that quietly shows 0% for something it
-    never measured is worse than one that shows nothing.
+    Two rules worth protecting. It reports what it can actually see and names
+    what it cannot - a resource page quietly showing 0% for something it never
+    measured is worse than one showing nothing. And no single panel failing
+    may take the page down with it.
+
+    Note this suite runs on SQLite, where none of the PostgreSQL catalogue
+    queries exist. That makes it a good test of the degradation path: the
+    endpoint must still answer 200 with `database.available` false, rather
+    than 503.
     """
 
     async def test_the_snapshot_is_served(self, client, admin_headers):
@@ -637,12 +643,34 @@ class TestSelfMonitoring:
 
         body = response.json()
         assert body["disk"]["path"] == "/"
-        assert body["database"]["available"] is True
         assert body["api"] is not None
+        assert "database" in body
+
+    async def test_a_failing_panel_does_not_500_the_page(
+        self, client, admin_headers
+    ):
+        """The whole point of the guards.
+
+        On SQLite `pg_database_size` does not exist, so the database panel
+        fails. That must degrade to `available: false` with the reason - not
+        abort the request, and not poison the session for the panels that run
+        after it.
+        """
+        response = await client.get("/api/system/resources", headers=admin_headers)
+        assert response.status_code == 200
+
+        body = response.json()
+        assert body["database"]["available"] is False
+        assert body["database"]["error"]
+        # Sections that run *after* the failure must still have loaded, which
+        # is what proves the transaction was reset rather than left aborted.
+        assert body["disk"]["available"] is True
+        assert isinstance(body["workers"], list)
+        assert body["not_measured"]
 
     async def test_it_names_what_it_cannot_measure(self, client, admin_headers):
-        """No Docker socket means no nginx CPU and no postgres memory. Both
-        are declared rather than left as an empty tile."""
+        """No Docker socket means no nginx CPU and no postgres process memory.
+        Both are declared rather than left as an empty tile."""
         response = await client.get("/api/system/resources", headers=admin_headers)
         not_measured = response.json()["not_measured"]
 
@@ -652,16 +680,6 @@ class TestSelfMonitoring:
         assert "postgres" in services
         # Each one explains itself; a bare "unavailable" teaches nobody.
         assert all(len(item["reason"]) > 40 for item in not_measured)
-
-    async def test_database_size_and_tables_are_real(self, client, admin_headers):
-        response = await client.get("/api/system/resources", headers=admin_headers)
-        database = response.json()["database"]
-
-        assert database["size_bytes"] > 0
-        assert database["max_connections"] > 0
-        # Table names come from the live catalogue, so ours must be in there.
-        names = {table["name"] for table in database["tables"]}
-        assert names & {"endpoints", "monitoring_results", "users"}
 
     async def test_cpu_percent_is_null_before_a_second_sample(self):
         """A rate needs two readings. Reporting 0% on the first call would be
@@ -681,17 +699,15 @@ class TestSelfMonitoring:
         assert 0 <= disk["used_percent"] <= 100
 
     async def test_redis_absence_is_a_state_not_a_failure(self):
-        """The suite runs with REDIS_URL empty, and the application degrades
-        to in-process equivalents - so this must report unavailable rather
-        than raise."""
+        """The suite runs with REDIS_URL empty and the application degrades to
+        in-process equivalents, so this reports unavailable rather than
+        raising."""
         from app.services import resource_service
 
         stats = await resource_service.redis_stats()
         assert stats["available"] is False
         assert stats["reason"]
 
-    async def test_it_needs_settings_read(self, client, viewer_headers):
-        response = await client.get("/api/system/resources", headers=viewer_headers)
-        # The viewer role holds settings:read, so this is allowed - the point
-        # is that the route is permission-gated at all.
-        assert response.status_code in (200, 403)
+    async def test_the_route_is_permission_gated(self, client):
+        response = await client.get("/api/system/resources")
+        assert response.status_code == 401

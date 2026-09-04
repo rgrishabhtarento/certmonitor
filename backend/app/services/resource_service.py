@@ -201,14 +201,19 @@ async def database_stats(session: AsyncSession) -> dict[str, Any]:
         ).scalar()
 
         # Largest tables, including their indexes and TOAST.
+        #
+        # Every column is qualified. `pg_stat_user_tables` also has a
+        # `relname`, so a bare one here is ambiguous and PostgreSQL rejects
+        # the whole statement - and the alias is `live_rows` rather than
+        # `rows`, which is a reserved word.
         rows = (
             await session.execute(
                 text(
                     """
-                    SELECT relname,
+                    SELECT c.relname AS table_name,
                            pg_total_relation_size(c.oid) AS bytes,
                            pg_size_pretty(pg_total_relation_size(c.oid)) AS pretty,
-                           COALESCE(s.n_live_tup, 0) AS rows
+                           COALESCE(s.n_live_tup, 0) AS live_rows
                     FROM pg_class c
                     JOIN pg_namespace n ON n.oid = c.relnamespace
                     LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
@@ -237,8 +242,10 @@ async def database_stats(session: AsyncSession) -> dict[str, Any]:
                 )
             )
         ).scalar()
+        # current_setting() rather than SHOW: it is an ordinary SELECT, so it
+        # goes through the driver's normal prepared-statement path.
         max_connections = (
-            await session.execute(text("SHOW max_connections"))
+            await session.execute(text("SELECT current_setting('max_connections')"))
         ).scalar()
         stats["connections"] = int(connections or 0)
         stats["max_connections"] = int(max_connections or 0)
@@ -259,9 +266,16 @@ async def database_stats(session: AsyncSession) -> dict[str, Any]:
         ).scalar()
         stats["cache_hit_percent"] = float(hit) if hit is not None else None
 
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:
+        # The rollback is not optional. PostgreSQL aborts the whole
+        # transaction on any statement error, and every later query on this
+        # session then fails with "current transaction is aborted" - so
+        # swallowing the original error here without resetting would turn one
+        # bad query into a 503 for the entire page, attributed to whatever ran
+        # next. Clearing the state keeps the failure local to this section.
         logger.warning("database_stats_failed", error=str(exc))
-        return {"available": False, "error": str(exc)}
+        await session.rollback()
+        return {"available": False, "error": str(exc)[:300]}
 
     # ---- growth, measured from the data rather than assumed
     try:
@@ -291,8 +305,11 @@ async def database_stats(session: AsyncSession) -> dict[str, Any]:
         else:
             stats["growth_bytes_per_day"] = None
             stats["at_steady_state"] = False
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:
         logger.warning("database_growth_failed", error=str(exc))
+        await session.rollback()
+        stats["growth_bytes_per_day"] = None
+        stats["at_steady_state"] = False
 
     return stats
 
@@ -363,17 +380,25 @@ async def worker_stats(session: AsyncSession) -> list[dict[str, Any]]:
     cutoff = datetime.now(timezone.utc) - timedelta(
         seconds=settings.WORKER_RETIRE_AFTER_SECONDS
     )
-    rows = list(
-        (
-            await session.execute(
-                select(WorkerHeartbeat)
-                .where(WorkerHeartbeat.last_seen_at >= cutoff)
-                .order_by(WorkerHeartbeat.worker_id)
+    try:
+        rows = list(
+            (
+                await session.execute(
+                    select(WorkerHeartbeat)
+                    .where(WorkerHeartbeat.last_seen_at >= cutoff)
+                    .order_by(WorkerHeartbeat.worker_id)
+                )
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
+    except Exception as exc:
+        # The likely cause is migration 0006 not yet applied, which leaves the
+        # model selecting cpu_percent from a table that does not have it.
+        # A resource page must not 500 because one of its panels cannot load.
+        logger.warning("worker_stats_failed", error=str(exc))
+        await session.rollback()
+        return []
 
     now = datetime.now(timezone.utc)
     return [
