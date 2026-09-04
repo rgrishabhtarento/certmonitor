@@ -874,10 +874,18 @@ back and revoke it. What *does* revoke immediately is bumping the user's
 `token_version` — which a password reset, a role change or disabling the
 account already does.
 
-**To clear a lockout without waiting it out:** Users → the locked account →
-**Clear lockout**. That resets the counter and lets them sign in straight
-away, which is almost always what you want when someone is locked out and
-standing next to you.
+**To let someone sign in again, now:** Users → the account → the amber
+**unlock** icon. It appears as soon as anything is blocking them, not only
+once they are fully locked out.
+
+That matters because there are **two** throttles and they trip at different
+points. The *rate limiter* fires first - a short, sharp window keyed on both
+the username and the source address, held in Redis - and produces the 429
+"try again in N seconds". The *account lockout* comes later, at the failed-
+attempt limit, and lives on the user row. Someone who fumbles their password
+a few times hits the first one, and clearing only the row would leave them
+refused anyway. The button clears both, including the rate limit on whatever
+addresses recently failed against that username.
 
 ### Audit log
 

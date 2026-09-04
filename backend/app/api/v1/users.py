@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -11,13 +11,17 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DbSession, ManageUsers, ReadUsers
+from app.core.config import settings
 from app.core.enums import AuditAction
+from app.core.ratelimit import clear_login_rate_limit
 from app.core.logging import get_logger
+from app.models.system import AuditLog
 from app.models.user import Role, User
 from app.schemas.common import Message, Page
 from app.schemas.user import (
     PasswordResetRequest,
     RoleRead,
+    SignInResetResult,
     UserCreate,
     UserRead,
     UserUpdate,
@@ -337,3 +341,105 @@ async def delete_user(
     )
     await session.commit()
     return Message(detail=f"User '{username}' deleted.")
+
+
+@router.post(
+    "/{user_id}/reset-lockout",
+    response_model=SignInResetResult,
+    summary="Clear a user's lockout and login rate limit",
+)
+async def reset_sign_in_limits(
+    user_id: uuid.UUID,
+    admin: ManageUsers,
+    request: Request,
+    session: DbSession,
+) -> SignInResetResult:
+    """Let someone sign in again, now.
+
+    There are **two** independent throttles on the sign-in path and they trip
+    at different points, which is why clearing one was never enough:
+
+    * the **account lockout** - `failed_login_attempts` reaching the
+      configured limit, which sets `locked_until` on the user row, and
+    * the **login rate limiter** - a shorter, sharper window keyed separately
+      on the username *and* on the source address, held in Redis rather than
+      on the user.
+
+    Someone who fumbles their password a few times usually trips the rate
+    limiter first and gets a 429 telling them to wait. Nothing in the product
+    could clear that: the existing "unlock" only reset the row, so an
+    administrator standing next to the person could still do nothing but tell
+    them to wait five minutes.
+
+    This clears both. The address side is recovered from the recent
+    failed-login audit entries for that username, because the limiter is keyed
+    on IP as well and lifting only the username key would leave them blocked
+    by the other one.
+    """
+    target = await _load_user(session, user_id)
+    was_locked = bool(target.locked_until)
+    attempts = target.failed_login_attempts or 0
+
+    # ---- the row
+    target.locked_until = None
+    target.failed_login_attempts = 0
+
+    # ---- the username key
+    await clear_login_rate_limit(f"user:{target.username.lower()}")
+
+    # ---- and every address that recently failed against this username
+    since = datetime.now(timezone.utc) - timedelta(
+        seconds=settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS * 2
+    )
+    addresses = [
+        row
+        for row in (
+            await session.execute(
+                select(AuditLog.ip_address)
+                .where(
+                    AuditLog.action == AuditAction.LOGIN_FAILED.value,
+                    func.lower(AuditLog.username) == target.username.lower(),
+                    AuditLog.created_at >= since,
+                    AuditLog.ip_address.is_not(None),
+                )
+                .distinct()
+                .limit(10)
+            )
+        ).scalars()
+        if row
+    ]
+    for address in addresses:
+        await clear_login_rate_limit(f"ip:{address}")
+
+    await audit_service.record(
+        session,
+        action=AuditAction.USER_UPDATED.value,
+        user=admin,
+        resource_type="user",
+        resource_id=target.id,
+        resource_name=target.username,
+        details={
+            "sign_in_limits_reset": True,
+            "was_locked": was_locked,
+            "failed_attempts_cleared": attempts,
+            "addresses_cleared": len(addresses),
+        },
+        request=request,
+    )
+    await session.commit()
+
+    logger.info(
+        "sign_in_limits_reset",
+        username=target.username,
+        by=admin.username,
+        was_locked=was_locked,
+        failed_attempts_cleared=attempts,
+        addresses_cleared=len(addresses),
+    )
+    return SignInResetResult(
+        detail=f"'{target.username}' can sign in again immediately.",
+        was_locked=was_locked,
+        failed_attempts_cleared=attempts,
+        addresses_cleared=len(addresses),
+        user=_to_schema(target),
+    )

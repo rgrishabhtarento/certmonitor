@@ -468,3 +468,107 @@ class TestConfigurableSessionTimeout:
             json={"username": "lockme2", "password": "LockMePass@123"},
         )
         assert response.status_code == 200
+
+
+class TestResetSignInLimits:
+    """An administrator can let someone back in immediately.
+
+    Two throttles guard the sign-in path and they trip at different points.
+    The rate limiter fires first and lives in Redis rather than on the user
+    row, so clearing the row alone - which is all the old "unlock" did - left
+    the person still refused with a 429.
+    """
+
+    @pytest.fixture
+    async def blocked(self, client, admin_headers, session):
+        from app.services import user_service
+
+        user = await user_service.create_user(
+            session,
+            username="blocked1",
+            password="BlockedPass@123",
+            role_name="viewer",
+            must_change_password=False,
+        )
+        await session.commit()
+
+        # Enough wrong attempts to raise the failure counter.
+        for _ in range(3):
+            await client.post(
+                "/api/auth/login",
+                json={"username": "blocked1", "password": "wrong-password"},
+            )
+        return user
+
+    async def test_it_clears_the_failure_counter(
+        self, client, admin_headers, blocked, session
+    ):
+        response = await client.post(
+            f"/api/users/{blocked.id}/reset-lockout", headers=admin_headers
+        )
+        assert response.status_code == 200, response.text
+
+        body = response.json()
+        assert body["failed_attempts_cleared"] == 3
+        assert body["user"]["failed_login_attempts"] == 0
+        assert body["user"]["is_locked"] is False
+
+    async def test_it_clears_the_rate_limiter_too(
+        self, client, admin_headers, blocked
+    ):
+        """The part the old unlock could not do.
+
+        Trip the rate limiter, confirm the 429, then reset and confirm the
+        correct password is accepted rather than refused for another window.
+        """
+        from app.core.ratelimit import check_login_rate_limit
+
+        # Exhaust the per-username budget directly, the way a run of failed
+        # sign-ins would.
+        for _ in range(20):
+            result = await check_login_rate_limit("user:blocked1")
+            if not result.allowed:
+                break
+        assert not (await check_login_rate_limit("user:blocked1")).allowed
+
+        reset = await client.post(
+            f"/api/users/{blocked.id}/reset-lockout", headers=admin_headers
+        )
+        assert reset.status_code == 200
+
+        # The budget is available again, so a correct password gets through.
+        assert (await check_login_rate_limit("user:blocked1")).allowed
+
+    async def test_the_response_says_what_was_cleared(
+        self, client, admin_headers, blocked
+    ):
+        """A vague "unlocked" is unhelpful when two different things could
+        have been blocking them. The counts name which one it was."""
+        response = await client.post(
+            f"/api/users/{blocked.id}/reset-lockout", headers=admin_headers
+        )
+        body = response.json()
+        assert "blocked1" in body["detail"]
+        assert "was_locked" in body
+        assert "addresses_cleared" in body
+
+    async def test_a_viewer_cannot_reset_someone(
+        self, client, viewer_headers, blocked
+    ):
+        response = await client.post(
+            f"/api/users/{blocked.id}/reset-lockout", headers=viewer_headers
+        )
+        assert response.status_code == 403
+
+    async def test_it_is_safe_on_an_unblocked_account(
+        self, client, admin_headers, seeded
+    ):
+        """No failures, nothing locked - it should succeed and report zero
+        rather than error."""
+        admin = seeded["admin"]
+        response = await client.post(
+            f"/api/users/{admin.id}/reset-lockout", headers=admin_headers
+        )
+        assert response.status_code == 200
+        assert response.json()["failed_attempts_cleared"] == 0
+        assert response.json()["was_locked"] is False

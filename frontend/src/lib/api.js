@@ -411,6 +411,10 @@ export const usersApi = {
   get: (id) => api.get(`/users/${id}`).then((r) => r.data),
   create: (payload) => api.post('/users', payload).then((r) => r.data),
   update: (id, payload) => api.put(`/users/${id}`, payload).then((r) => r.data),
+  // Clears BOTH sign-in throttles: the account lockout on the row and the
+  // login rate limiter keyed on the username and recent addresses.
+  resetSignInLimits: (id) =>
+    api.post(`/users/${id}/reset-lockout`).then((r) => r.data),
   resetPassword: (id, payload) =>
     api.post(`/users/${id}/reset-password`, payload).then((r) => r.data),
   remove: (id) => api.delete(`/users/${id}`).then((r) => r.data),

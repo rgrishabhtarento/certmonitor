@@ -110,3 +110,20 @@ class RoleRead(ORMModel):
     is_system: bool
     permissions: list[str] = Field(default_factory=list)
     user_count: int = 0
+
+
+class SignInResetResult(BaseModel):
+    """What was actually cleared, so the confirmation is specific.
+
+    "Unlocked" is too vague when two different throttles could have been the
+    thing blocking the person - the counts say which one it was.
+    """
+
+    detail: str
+    was_locked: bool = False
+    failed_attempts_cleared: int = 0
+    addresses_cleared: int = Field(
+        default=0,
+        description="Source addresses whose login rate limit was also lifted.",
+    )
+    user: "UserRead"

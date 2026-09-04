@@ -186,6 +186,33 @@ export default function UsersPage() {
     }
   }
 
+  /**
+   * Let someone sign in again immediately.
+   *
+   * Clears both throttles at once - the account lockout on the user row and
+   * the login rate limiter keyed on their username and recent addresses. The
+   * confirmation names which one was actually in the way, because "unlocked"
+   * is unhelpfully vague when there were two things it could have been.
+   */
+  const resetSignInLimits = async (target) => {
+    try {
+      const result = await usersApi.resetSignInLimits(target.id)
+      const cleared = [
+        result.was_locked ? 'lockout' : null,
+        result.failed_attempts_cleared
+          ? `${result.failed_attempts_cleared} failed attempt(s)`
+          : null,
+        result.addresses_cleared
+          ? `rate limit on ${result.addresses_cleared} address(es)`
+          : 'login rate limit',
+      ].filter(Boolean)
+      toast.success(`${result.detail} Cleared: ${cleared.join(', ')}.`)
+      load()
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
   const items = data?.items || []
 
   return (
@@ -364,14 +391,22 @@ export default function UsersPage() {
                       <td className="text-right">
                         {canManage ? (
                           <div className="flex justify-end gap-1">
-                            {row.is_locked ? (
+                            {/* Shown as soon as anything is blocking them,
+                                not only once they are fully locked out. The
+                                rate limiter trips well before the lockout
+                                does, and waiting for the lockout meant an
+                                administrator could watch someone be refused
+                                and have nothing to press. */}
+                            {row.is_locked || (row.failed_login_attempts || 0) > 0 ? (
                               <button
                                 type="button"
-                                className="btn-ghost p-1.5"
-                                title="Clear the lockout"
-                                onClick={() =>
-                                  quickToggle(row, { unlock: true }, 'Lockout cleared.')
+                                className="btn-ghost p-1.5 text-amber-600 dark:text-amber-400"
+                                title={
+                                  row.is_locked
+                                    ? 'Clear the lockout and login rate limit'
+                                    : `Clear ${row.failed_login_attempts} failed attempt(s) and the login rate limit`
                                 }
+                                onClick={() => resetSignInLimits(row)}
                               >
                                 <Unlock size={15} />
                               </button>
