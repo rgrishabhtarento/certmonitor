@@ -181,7 +181,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # ------------------------------------------------------------ application
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="CertMonitor API",
+        title="InfraSight API",
         description=DESCRIPTION,
         version=APP_VERSION,
         openapi_tags=TAGS_METADATA,

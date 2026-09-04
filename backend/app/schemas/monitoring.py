@@ -387,7 +387,7 @@ class DiagnosticEvidence(BaseModel):
 
     ``kind`` is the honesty mechanism: ``observed`` was measured or read from
     the database, ``inferred`` is a conclusion drawn from observations, and
-    ``unknown`` names something relevant that CertMonitor cannot see from
+    ``unknown`` names something relevant that InfraSight cannot see from
     where it runs - so the reader knows to check it themselves rather than
     assuming it was covered.
     """
@@ -422,7 +422,7 @@ class DiagnosticAction(BaseModel):
 
     Ordered safest first, so an engineer who stops after step two has still
     done the sensible thing. Nothing marked ``high_risk`` is ever executed by
-    CertMonitor - it is only described.
+    InfraSight - it is only described.
     """
 
     step: int
@@ -470,7 +470,7 @@ class DiagnosticsResponse(BaseModel):
     evidence: list[DiagnosticEvidence] = Field(default_factory=list)
     not_observable: list[DiagnosticEvidence] = Field(
         default_factory=list,
-        description="What CertMonitor cannot see from outside the endpoint, "
+        description="What InfraSight cannot see from outside the endpoint, "
         "stated explicitly so no reader mistakes silence for a clean bill.",
     )
     actions: list[DiagnosticAction] = Field(default_factory=list)

@@ -578,7 +578,7 @@ async def diagnose_endpoint(
 
     The result is a *ranked* set of probable causes with the evidence behind
     each, a confidence band derived from that evidence, prioritised actions
-    labelled by blast radius, and a verification plan. Everything CertMonitor
+    labelled by blast radius, and a verification plan. Everything InfraSight
     cannot see - container state, host resources, application logs - is listed
     explicitly rather than guessed at.
 

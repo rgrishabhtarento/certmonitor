@@ -312,7 +312,7 @@ class EvidenceKind(StrEnum):
 
     OBSERVED is something this diagnosis actually measured or read from the
     database. INFERRED is a conclusion drawn from observations. UNKNOWN is a
-    thing that matters but that CertMonitor cannot see from where it runs,
+    thing that matters but that InfraSight cannot see from where it runs,
     and is stated as such rather than guessed at.
     """
 
@@ -326,7 +326,7 @@ class ActionRisk(StrEnum):
 
     SAFE is read-only. DISRUPTIVE interrupts service briefly. HIGH_RISK can
     lose data or take an application down; nothing in that band is ever
-    executed by CertMonitor, only described.
+    executed by InfraSight, only described.
     """
 
     SAFE = "safe"

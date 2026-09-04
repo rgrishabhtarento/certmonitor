@@ -536,7 +536,7 @@ class TestOpenApi:
         assert response.status_code == 200
 
         schema = response.json()
-        assert schema["info"]["title"] == "CertMonitor API"
+        assert schema["info"]["title"] == "InfraSight API"
         for path in (
             "/api/auth/login",
             "/api/endpoints",

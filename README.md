@@ -1,8 +1,8 @@
-# CertMonitor
+# InfraSight
 
 Infrastructure endpoint and SSL certificate monitoring for DevOps/SRE teams.
 
-CertMonitor continuously checks HTTP(S), TLS and TCP endpoints, records real
+InfraSight continuously checks HTTP(S), TLS and TCP endpoints, records real
 response timings, tracks certificate expiry, opens and closes incidents from
 observed state, and raises alerts through webhooks, Slack, Teams, PagerDuty or
 e-mail. Everything on the dashboard comes from checks the monitoring worker
@@ -128,6 +128,51 @@ Roughly 2 GB RAM and 2 CPUs is comfortable for a few hundred endpoints.
 
 ## 3. Quick start
 
+### Upgrading from CertMonitor
+
+This application was previously called **CertMonitor**. The rename is
+cosmetic in the code, but three identifiers name real infrastructure, and
+letting them change silently would look exactly like data loss:
+
+| | Was | Now |
+|---|---|---|
+| Compose project (and therefore the volume) | `certmonitor` → `certmonitor_postgres_data` | `infrasight` → `infrasight_postgres_data` |
+| Postgres role and database | `certmonitor` | `infrasight` |
+| Container names | `certmonitor-*` | `infrasight-*` |
+
+**The safe upgrade is two lines in your existing `.env`:**
+
+```bash
+COMPOSE_PROJECT_NAME=certmonitor   # keeps the existing postgres volume
+# leave POSTGRES_DB / POSTGRES_USER as certmonitor
+```
+
+Then rebuild as normal:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Your data, containers and volume stay exactly where they are; only the name
+in the UI changes. **Without those lines, Compose creates a new empty volume
+and the dashboard comes up with nothing in it** — your data is still safe in
+`certmonitor_postgres_data`, but the application will not be looking at it.
+
+Two other things carry across on their own:
+
+- **Webhook signatures.** Payloads are signed with both
+  `X-InfraSight-Signature` and the original `X-CertMonitor-Signature`, same
+  value, so receivers verifying the old header keep working.
+- **Browser sessions and theme.** The old `localStorage` keys are read once
+  and migrated, so nobody is signed out by the upgrade.
+
+One thing does change: the outbound `User-Agent` on checks is now
+`InfraSight/1.0`. If any monitored service allow-lists it by name, update that
+allow-list.
+
+
+
 ```bash
 # 1. Configure
 cp .env.example .env
@@ -187,18 +232,19 @@ docker compose up -d --scale worker=3
 ```
 
 Safe by design: workers claim disjoint sets of endpoints via `SKIP LOCKED`.
-Remove `container_name: certmonitor-worker` from the Compose file first, since
+Remove `container_name: infrasight-worker` from the Compose file first, since
 a fixed container name prevents scaling.
 
 ### Data persistence
 
-PostgreSQL data lives in the named volume `certmonitor_postgres_data`, not in
-the container filesystem. `docker compose down` and image rebuilds preserve it;
-only `docker compose down -v` destroys it.
+PostgreSQL data lives in the named volume `<project>_postgres_data`
+(`infrasight_postgres_data` by default, or whatever `COMPOSE_PROJECT_NAME`
+is set to), not in the container filesystem. `docker compose down` and image
+rebuilds preserve it; only `docker compose down -v` destroys it.
 
 ```bash
-docker volume ls | grep certmonitor
-docker volume inspect certmonitor_postgres_data
+docker volume ls | grep infrasight
+docker volume inspect infrasight_postgres_data
 ```
 
 ---
@@ -483,7 +529,7 @@ hosts at once cannot know which is which. Every one of those would otherwise
 sit permanently red on a 404 that says nothing about whether the service works.
 
 So when a check returns a status meaning **the path is not there** (404, 405,
-410, 501), CertMonitor tries the configured candidate paths in order and adopts
+410, 501), InfraSight tries the configured candidate paths in order and adopts
 the first that answers correctly. The endpoint reports its real state, and
 `resolved_health_path` records which path won — shown on the endpoints table
 and the detail page, with your configured `url` left exactly as you wrote it.
@@ -645,11 +691,11 @@ Webhook payload:
     "current_status": "down"
   },
   "details": { "failure_reason": "connection_timeout", "consecutive_failures": 3 },
-  "source": "certmonitor"
+  "source": "infrasight"
 }
 ```
 
-With a signing secret configured, an `X-CertMonitor-Signature: sha256=…` HMAC
+With a signing secret configured, an `X-InfraSight-Signature: sha256=…` HMAC
 over the exact bytes sent lets the receiver verify origin.
 
 PagerDuty uses Events API v2 and *resolves* the incident on recovery rather than
@@ -874,15 +920,15 @@ lowers confidence rather than picking one.
 
 ### It never invents infrastructure
 
-This is the rule that matters most. CertMonitor watches an endpoint from the
+This is the rule that matters most. InfraSight watches an endpoint from the
 outside; it has no view of pods, containers, CPU, memory or databases. So it
 says so, in a **Not observable** section as prominent as the evidence:
 
 | | |
 |---|---|
-| Container / pod state | Not visible from CertMonitor |
-| Host resources | Not visible from CertMonitor |
-| Application logs | Not visible from CertMonitor |
+| Container / pod state | Not visible from InfraSight |
+| Host resources | Not visible from InfraSight |
+| Application logs | Not visible from InfraSight |
 | Upstream dependencies | Not modelled |
 
 Every statement in the report is tagged **Observed**, **Inferred** or **Not
@@ -991,7 +1037,7 @@ it. All of it computed on this server, from this server's own database.
 
 There is no LLM, no API key, and no outbound call. The intelligence is rules,
 statistics, historical data, correlation, pattern detection and weighted
-scoring — the same engine described in [Diagnose](#15-diagnose). CertMonitor
+scoring — the same engine described in [Diagnose](#15-diagnose). InfraSight
 runs with no internet access beyond reaching the endpoints it monitors, and
 `docker compose up -d` still starts everything.
 
@@ -1263,7 +1309,7 @@ pip install -r requirements.txt
 # Just the dependencies from Compose
 docker compose up -d postgres redis
 
-export DATABASE_URL="postgresql+asyncpg://certmonitor:yourpassword@localhost:5432/certmonitor"
+export DATABASE_URL="postgresql+asyncpg://infrasight:yourpassword@localhost:5432/infrasight"
 export JWT_SECRET="dev-secret-at-least-32-characters-long"
 export APP_ENV=development LOG_FORMAT=console
 
@@ -1346,12 +1392,12 @@ mkdir -p backups
 
 # Compressed custom-format dump (recommended)
 docker compose exec -T postgres pg_dump \
-  -U certmonitor -d certmonitor -Fc \
-  > "backups/certmonitor-$(date +%F-%H%M).dump"
+  -U infrasight -d infrasight -Fc \
+  > "backups/infrasight-$(date +%F-%H%M).dump"
 
 # Plain SQL
-docker compose exec -T postgres pg_dump -U certmonitor -d certmonitor \
-  > "backups/certmonitor-$(date +%F).sql"
+docker compose exec -T postgres pg_dump -U infrasight -d infrasight \
+  > "backups/infrasight-$(date +%F).sql"
 
 # Configuration only (no history) - handy for seeding another instance
 curl -s "http://localhost:8080/api/export?format=csv" \
@@ -1364,7 +1410,7 @@ cp .env backups/env-$(date +%F).bak     # store encrypted, never in git
 A nightly cron entry:
 
 ```cron
-0 2 * * * cd /opt/certmonitor && docker compose exec -T postgres pg_dump -U certmonitor -d certmonitor -Fc > backups/certmonitor-$(date +\%F).dump && find backups -name '*.dump' -mtime +30 -delete
+0 2 * * * cd /opt/infrasight && docker compose exec -T postgres pg_dump -U infrasight -d infrasight -Fc > backups/infrasight-$(date +\%F).dump && find backups -name '*.dump' -mtime +30 -delete
 ```
 
 ### Restore
@@ -1374,14 +1420,14 @@ A nightly cron entry:
 docker compose stop backend worker
 
 # 2. Recreate the database
-docker compose exec -T postgres psql -U certmonitor -d postgres \
-  -c "DROP DATABASE IF EXISTS certmonitor;" -c "CREATE DATABASE certmonitor;"
+docker compose exec -T postgres psql -U infrasight -d postgres \
+  -c "DROP DATABASE IF EXISTS infrasight;" -c "CREATE DATABASE infrasight;"
 
 # 3. Restore
-docker compose exec -T postgres pg_restore -U certmonitor -d certmonitor --clean --if-exists \
-  < backups/certmonitor-2026-09-03-0200.dump
+docker compose exec -T postgres pg_restore -U infrasight -d infrasight --clean --if-exists \
+  < backups/infrasight-2026-09-03-0200.dump
 # for a plain SQL dump:
-#   docker compose exec -T postgres psql -U certmonitor -d certmonitor < backups/certmonitor-2026-09-03.sql
+#   docker compose exec -T postgres psql -U infrasight -d infrasight < backups/infrasight-2026-09-03.sql
 
 # 4. Put back the ORIGINAL .env (same JWT_SECRET / ENCRYPTION_KEY)
 
@@ -1402,7 +1448,7 @@ re-entered. Re-enter those secrets and monitoring resumes.
 
 ```bash
 docker compose down
-docker run --rm -v certmonitor_postgres_data:/data -v "$PWD/backups:/backup" \
+docker run --rm -v infrasight_postgres_data:/data -v "$PWD/backups:/backup" \
   alpine tar czf /backup/pgdata-$(date +%F).tar.gz -C /data .
 docker compose up -d
 ```
@@ -1685,7 +1731,7 @@ severity/event/environment/tag filters.
 ## 25. Project structure
 
 ```
-certmonitor/
+infrasight/
 ├── backend/
 │   ├── alembic/
 │   │   ├── env.py

@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 # ---------------------------------------------------------------- env setup
-_TMP_DIR = tempfile.mkdtemp(prefix="certmonitor-tests-")
+_TMP_DIR = tempfile.mkdtemp(prefix="infrasight-tests-")
 _DB_PATH = Path(_TMP_DIR) / "test.sqlite3"
 
 os.environ.update(

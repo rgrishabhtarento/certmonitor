@@ -1112,7 +1112,7 @@ def _analyse(
                 "incident will be raised."
             ),
             action=(
-                "Wait for the deployment to complete. CertMonitor re-checks the "
+                "Wait for the deployment to complete. InfraSight re-checks the "
                 "endpoint automatically the moment it does."
             ),
         ))
@@ -1160,7 +1160,7 @@ def _analyse(
             "monitoring_egress",
             "The monitoring host's own network",
             "Most of the fleet failing at once is rarely many simultaneous "
-            "outages; it is usually one thing between CertMonitor and everything else.",
+            "outages; it is usually one thing between InfraSight and everything else.",
         ).add(STRONG, f"{fleet_down} of {fleet_total} endpoints are down")
         findings.append(Finding(
             severity="high",
@@ -1179,7 +1179,7 @@ def _analyse(
         actions.append(Action(
             title="Rule out the monitoring host's own network first",
             detail=(
-                "If CertMonitor cannot reach anything, every diagnosis below "
+                "If InfraSight cannot reach anything, every diagnosis below "
                 "is measuring the wrong thing."
             ),
             risk=ActionRisk.SAFE.value,
@@ -1335,7 +1335,7 @@ def _analyse(
             Action(
                 title="Confirm the port from another network",
                 detail=(
-                    "Rules out CertMonitor's own egress being the thing that "
+                    "Rules out InfraSight's own egress being the thing that "
                     "is blocked."
                 ),
                 risk=ActionRisk.SAFE.value,
@@ -1644,7 +1644,7 @@ def _analyse(
                 "resource_saturation",
                 "Resource saturation or thread/connection pool exhaustion",
                 "A process that accepts connections and then never answers is "
-                "usually out of workers, connections or memory. CertMonitor "
+                "usually out of workers, connections or memory. InfraSight "
                 "cannot measure this - it is inference from the shape of the failure.",
             ).add(SUPPORTING, "accepting but not answering is the classic signature")
             _score_change_correlation(candidates, closest_change, endpoint)
@@ -1736,7 +1736,7 @@ def _analyse(
                 actions.append(Action(
                     title="Point the monitor at a path that exists",
                     detail=(
-                        "CertMonitor can find it for you: turn on health-path "
+                        "InfraSight can find it for you: turn on health-path "
                         "discovery under Settings -> Monitoring and it will try "
                         "/health, /healthz, /ready, /actuator/health and adopt "
                         "whichever answers."
@@ -1778,7 +1778,7 @@ def _analyse(
             actions.append(Action(
                 title="Enable automatic health-path discovery",
                 detail=(
-                    "Settings -> Monitoring. CertMonitor will try the common health "
+                    "Settings -> Monitoring. InfraSight will try the common health "
                     "paths and adopt the first that answers, leaving your configured "
                     "URL unchanged."
                 ),
@@ -1873,7 +1873,7 @@ def _analyse(
             return _finish_analysis(
                 "rate_limited",
                 "The service is healthy but is rate limiting the monitor (HTTP 429).",
-                "CertMonitor is being throttled by the service it is checking.",
+                "InfraSight is being throttled by the service it is checking.",
                 candidates, findings, actions,
             )
 
@@ -2072,7 +2072,7 @@ def _analyse(
             "resource_saturation",
             "Resource or dependency saturation",
             "The usual causes of a uniform slowdown - CPU, memory, database "
-            "latency or a slow dependency. CertMonitor cannot measure any of "
+            "latency or a slow dependency. InfraSight cannot measure any of "
             "them; this is inference from the timing alone.",
         ).add(SUPPORTING, "a uniform slowdown with correct responses fits saturation")
         _score_change_correlation(candidates, closest_change, endpoint)
@@ -2249,14 +2249,14 @@ def _application_actions(
 
     Safest first, then most likely, then most impactful - so an engineer who
     stops after step two has still done the sensible thing. Nothing here is
-    executed by CertMonitor; the container commands are explicitly conditional
-    because CertMonitor cannot see whether a container is involved at all.
+    executed by InfraSight; the container commands are explicitly conditional
+    because InfraSight cannot see whether a container is involved at all.
     """
     steps = [
         Action(
             title="Read the application log around the failure",
             detail=(
-                "CertMonitor never stores response bodies, so the application's "
+                "InfraSight never stores response bodies, so the application's "
                 "own log is the only place the reason exists."
             ),
             risk=ActionRisk.SAFE.value,
@@ -2307,7 +2307,7 @@ def _application_actions(
             ),
             risk=ActionRisk.HIGH_RISK.value,
             command_note=(
-                "CertMonitor will not do this for you. Raise it as a change so "
+                "InfraSight will not do this for you. Raise it as a change so "
                 "the rollback is recorded and monitoring is paused for it."
             ),
         ))

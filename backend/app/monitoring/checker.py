@@ -121,7 +121,7 @@ class CheckTarget:
     response_time_threshold_ms: int | None = None
     ssl_warning_days: int = 30
     ssl_critical_days: int = 7
-    user_agent: str = "CertMonitor/1.0 (+endpoint-health-check)"
+    user_agent: str = "InfraSight/1.0 (+endpoint-health-check)"
 
     # Alternative paths to try when `url` turns out not to exist. Empty
     # disables discovery entirely, which is the behaviour of every check that

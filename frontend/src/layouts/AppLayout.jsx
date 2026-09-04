@@ -53,13 +53,15 @@ const NAV = [
   { to: '/settings', label: 'Settings', icon: Settings, permission: 'settings:read' },
 ]
 
-const THEME_KEY = 'certmonitor.theme'
+const THEME_KEY = 'infrasight.theme'
 
 function useTheme() {
   const [theme, setTheme] = useState(() => {
     try {
       return (
         localStorage.getItem(THEME_KEY) ||
+        // Pre-rename key, so an upgrade does not reset the chosen theme.
+        localStorage.getItem('certmonitor.theme') ||
         (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
       )
     } catch {
@@ -186,7 +188,7 @@ export default function AppLayout() {
               <Activity size={17} />
             </span>
             <span className="text-base font-semibold text-slate-900 dark:text-slate-50">
-              CertMonitor
+              InfraSight
             </span>
           </NavLink>
 

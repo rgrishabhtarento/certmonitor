@@ -19,7 +19,7 @@ from how much independent evidence supports the leader and how far ahead of
 the runner-up it is. Two signals pointing the same way is Medium however
 confidently the sentence reads.
 
-**Never invent infrastructure.** CertMonitor observes an endpoint from the
+**Never invent infrastructure.** InfraSight observes an endpoint from the
 outside. It has no view of pods, containers, CPU or databases, and says so
 explicitly rather than producing a plausible guess. Every statement is tagged
 ``observed``, ``inferred`` or ``unknown`` - see :class:`Evidence`.
@@ -51,7 +51,7 @@ class Evidence:
 
     ``kind`` is the honesty mechanism. ``observed`` was measured or read from
     the database; ``inferred`` is a conclusion drawn from observations;
-    ``unknown`` names something that matters but is outside what CertMonitor
+    ``unknown`` names something that matters but is outside what InfraSight
     can see, so the operator knows to look themselves rather than assuming it
     was checked.
     """
@@ -268,7 +268,7 @@ def severity_for(
 
 # -------------------------------------------------------- not observable
 def blind_spots(has_change_data: bool) -> list[Evidence]:
-    """What CertMonitor cannot see, stated plainly.
+    """What InfraSight cannot see, stated plainly.
 
     This exists because the most damaging thing a diagnostic tool can do is
     sound authoritative about something it never measured. "Pod is crashing"
@@ -278,7 +278,7 @@ def blind_spots(has_change_data: bool) -> list[Evidence]:
     items = [
         Evidence(
             label="Container / pod state",
-            value="Not visible from CertMonitor",
+            value="Not visible from InfraSight",
             kind=EvidenceKind.UNKNOWN.value,
             detail=(
                 "Restart counts, CrashLoopBackOff, exit codes and readiness "
@@ -289,7 +289,7 @@ def blind_spots(has_change_data: bool) -> list[Evidence]:
         ),
         Evidence(
             label="Host resources",
-            value="Not visible from CertMonitor",
+            value="Not visible from InfraSight",
             kind=EvidenceKind.UNKNOWN.value,
             detail=(
                 "CPU, memory, disk and load on the monitored host are not "
@@ -299,7 +299,7 @@ def blind_spots(has_change_data: bool) -> list[Evidence]:
         ),
         Evidence(
             label="Application logs",
-            value="Not visible from CertMonitor",
+            value="Not visible from InfraSight",
             kind=EvidenceKind.UNKNOWN.value,
             detail=(
                 "Only the status line, timings and headers are recorded - "
@@ -313,7 +313,7 @@ def blind_spots(has_change_data: bool) -> list[Evidence]:
             value="Not modelled",
             kind=EvidenceKind.UNKNOWN.value,
             detail=(
-                "CertMonitor has no dependency graph, so it cannot tell you "
+                "InfraSight has no dependency graph, so it cannot tell you "
                 "that this service's database is down. If the dependency is "
                 "itself a monitored endpoint, check its status alongside this "
                 "one."
@@ -343,7 +343,7 @@ def diagnostic_commands(endpoint: Any, verdict: str) -> list[dict[str, str]]:
     Every command here is safe: it reads state and changes nothing. Twenty
     unrelated commands would be noise, so this returns only what the verdict
     justifies - and the container commands are explicitly conditional, because
-    CertMonitor does not know whether the service runs in one.
+    InfraSight does not know whether the service runs in one.
     """
     host = endpoint.hostname
     port = endpoint.port
@@ -359,7 +359,7 @@ def diagnostic_commands(endpoint: Any, verdict: str) -> list[dict[str, str]]:
         add(
             f"docker compose exec worker getent hosts {host}",
             "Resolve from inside the worker container - an internal-only name "
-            "may resolve for you but not for CertMonitor.",
+            "may resolve for you but not for InfraSight.",
         )
         return commands
 
@@ -400,7 +400,7 @@ def diagnostic_commands(endpoint: Any, verdict: str) -> list[dict[str, str]]:
     if verdict in ("upstream_unavailable", "application_error", "http_no_response"):
         add(
             "kubectl get pods -n <namespace> -l app=<label>",
-            "IF this runs on Kubernetes. CertMonitor cannot see the cluster; "
+            "IF this runs on Kubernetes. InfraSight cannot see the cluster; "
             "this is a suggestion, not an observation.",
         )
         add(

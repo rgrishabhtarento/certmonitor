@@ -10,28 +10,45 @@ import axios from 'axios'
  *  - notice the "password change required" signal from the API.
  */
 
-const TOKEN_KEY = 'certmonitor.access_token'
-const REFRESH_KEY = 'certmonitor.refresh_token'
-const USER_KEY = 'certmonitor.user'
+const TOKEN_KEY = 'infrasight.access_token'
+const REFRESH_KEY = 'infrasight.refresh_token'
+const USER_KEY = 'infrasight.user'
+
+// Pre-rename keys. Read as a fallback so the rename does not sign everyone
+// out - an unexpected logout after an upgrade looks exactly like a bug.
+const LEGACY_KEYS = {
+  [TOKEN_KEY]: 'certmonitor.access_token',
+  [REFRESH_KEY]: 'certmonitor.refresh_token',
+  [USER_KEY]: 'certmonitor.user',
+}
+
+/** Read a key, falling back to its pre-rename name and migrating it across. */
+function readKey(key) {
+  try {
+    const current = localStorage.getItem(key)
+    if (current !== null) return current
+
+    const legacy = localStorage.getItem(LEGACY_KEYS[key])
+    if (legacy !== null) {
+      localStorage.setItem(key, legacy)
+      localStorage.removeItem(LEGACY_KEYS[key])
+    }
+    return legacy
+  } catch {
+    return null
+  }
+}
 
 export const tokenStore = {
   get access() {
-    try {
-      return localStorage.getItem(TOKEN_KEY)
-    } catch {
-      return null
-    }
+    return readKey(TOKEN_KEY)
   },
   get refresh() {
-    try {
-      return localStorage.getItem(REFRESH_KEY)
-    } catch {
-      return null
-    }
+    return readKey(REFRESH_KEY)
   },
   get user() {
     try {
-      const raw = localStorage.getItem(USER_KEY)
+      const raw = readKey(USER_KEY)
       return raw ? JSON.parse(raw) : null
     } catch {
       return null

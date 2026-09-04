@@ -675,7 +675,7 @@ export default function DiagnosticsPanel({
                       </p>
                       {action.risk === 'high_risk' ? (
                         <p className="mt-1 pl-7 text-xs font-medium text-red-700 dark:text-red-300">
-                          {style.note} CertMonitor will never run this for you.
+                          {style.note} InfraSight will never run this for you.
                         </p>
                       ) : null}
                       {action.command ? (
@@ -781,13 +781,13 @@ export default function DiagnosticsPanel({
           {/* ========================================== 9. WHAT WE CANNOT SEE */}
           {report.not_observable?.length ? (
             <Section
-              title="Not observable from CertMonitor"
+              title="Not observable from InfraSight"
               icon={HelpCircle}
               subtitle="Check these yourself"
               defaultOpen={false}
             >
               <p className="mb-2 text-xs text-slate-600 dark:text-slate-300">
-                CertMonitor watches this endpoint from the outside. Nothing below
+                InfraSight watches this endpoint from the outside. Nothing below
                 was measured, so nothing below is claimed — it is listed so that
                 silence is not mistaken for a clean result.
               </p>

@@ -129,7 +129,7 @@ export default function SslCertificates() {
   const exportCsv = async () => {
     try {
       const { downloadFile } = await import('../lib/api')
-      await downloadFile('/api/export?format=csv', 'certmonitor-endpoints.csv')
+      await downloadFile('/api/export?format=csv', 'infrasight-endpoints.csv')
     } catch (err) {
       toast.error(err.message)
     }

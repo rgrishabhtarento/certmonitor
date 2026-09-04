@@ -426,7 +426,7 @@ def build_draft(evidence: dict[str, Any]) -> dict[str, Any]:
             f" {evidence['failed_checks']} consecutive monitoring checks failed."
         )
     impact += (
-        "\n\nUser-facing impact is not measured by CertMonitor - it observes "
+        "\n\nUser-facing impact is not measured by InfraSight - it observes "
         "the endpoint, not the traffic through it. Add what was actually "
         "affected."
     )

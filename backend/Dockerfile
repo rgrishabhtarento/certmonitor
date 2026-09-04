@@ -31,7 +31,7 @@ RUN python -m venv /opt/venv \
 # ---------------------------------------------------------------- runtime
 FROM python:3.12-slim-bookworm AS runtime
 
-LABEL org.opencontainers.image.title="CertMonitor Backend" \
+LABEL org.opencontainers.image.title="InfraSight Backend" \
       org.opencontainers.image.description="Endpoint and SSL certificate monitoring API and worker" \
       org.opencontainers.image.licenses="Proprietary"
 
@@ -59,17 +59,17 @@ WORKDIR /app
 
 # Run as an unprivileged user. Monitoring only needs outbound TCP, so no
 # capabilities are required.
-RUN groupadd --gid 10001 certmonitor \
- && useradd --uid 10001 --gid certmonitor --create-home --shell /usr/sbin/nologin certmonitor
+RUN groupadd --gid 10001 infrasight \
+ && useradd --uid 10001 --gid infrasight --create-home --shell /usr/sbin/nologin infrasight
 
-COPY --chown=certmonitor:certmonitor alembic.ini ./
-COPY --chown=certmonitor:certmonitor alembic ./alembic
-COPY --chown=certmonitor:certmonitor app ./app
-COPY --chown=certmonitor:certmonitor docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=infrasight:infrasight alembic.ini ./
+COPY --chown=infrasight:infrasight alembic ./alembic
+COPY --chown=infrasight:infrasight app ./app
+COPY --chown=infrasight:infrasight docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-USER certmonitor
+USER infrasight
 
 EXPOSE 8000
 

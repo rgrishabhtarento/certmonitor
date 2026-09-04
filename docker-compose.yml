@@ -1,4 +1,4 @@
-# CertMonitor - full stack.
+# InfraSight - full stack.
 #
 #   docker compose up -d          start everything
 #   docker compose logs -f        follow logs
@@ -9,17 +9,19 @@
 # The API and the worker run the same image with different entrypoint roles,
 # so they can never disagree about check semantics or the schema.
 
-name: certmonitor
+# Overridable so an existing CertMonitor deployment can pin the old project
+# name and keep pointing at its existing postgres volume. See .env.example.
+name: ${COMPOSE_PROJECT_NAME:-infrasight}
 
 services:
   # ------------------------------------------------------------ database
   postgres:
     image: postgres:16-alpine
-    container_name: certmonitor-postgres
+    container_name: infrasight-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-certmonitor}
-      POSTGRES_USER: ${POSTGRES_USER:-certmonitor}
+      POSTGRES_DB: ${POSTGRES_DB:-infrasight}
+      POSTGRES_USER: ${POSTGRES_USER:-infrasight}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       # Fail fast on a misconfigured locale rather than silently producing a
       # cluster with unexpected collation.
@@ -30,7 +32,7 @@ services:
       # and any container rebuild.
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-certmonitor} -d ${POSTGRES_DB:-certmonitor}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-infrasight} -d ${POSTGRES_DB:-infrasight}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -40,7 +42,7 @@ services:
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     networks:
-      - certmonitor
+      - infrasight
     stop_grace_period: 30s
     command:
       - postgres
@@ -60,7 +62,7 @@ services:
   # --------------------------------------------------------------- redis
   redis:
     image: redis:7-alpine
-    container_name: certmonitor-redis
+    container_name: infrasight-redis
     restart: unless-stopped
     # Used for cross-replica login rate limiting and import previews. The
     # application degrades to in-process equivalents if Redis is absent, so
@@ -81,21 +83,21 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - certmonitor
+      - infrasight
 
   # ----------------------------------------------------------- API layer
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: certmonitor/backend:${IMAGE_TAG:-latest}
-    container_name: certmonitor-backend
+    image: infrasight/backend:${IMAGE_TAG:-latest}
+    container_name: infrasight-backend
     restart: unless-stopped
     command: ["api"]
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certmonitor}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-certmonitor}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-infrasight}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-infrasight}
       REDIS_URL: redis://redis:6379/0
       API_WORKERS: ${API_WORKERS:-2}
     depends_on:
@@ -110,7 +112,7 @@ services:
       retries: 3
       start_period: 60s
     networks:
-      - certmonitor
+      - infrasight
     # Give uvicorn time to finish in-flight requests on SIGTERM.
     stop_grace_period: 30s
 
@@ -119,19 +121,19 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: certmonitor/backend:${IMAGE_TAG:-latest}
-    container_name: certmonitor-worker
+    image: infrasight/backend:${IMAGE_TAG:-latest}
+    container_name: infrasight-worker
     restart: unless-stopped
     # Stable hostname so the worker keeps one identity across restarts.
     # Without it the container ID becomes the worker id, and every recreate
     # orphans a heartbeat row. Scaling past one replica needs WORKER_ID set
     # per replica instead.
-    hostname: certmonitor-worker
+    hostname: infrasight-worker
     command: ["worker"]
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certmonitor}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-certmonitor}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-infrasight}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-infrasight}
       REDIS_URL: redis://redis:6379/0
       WORKER_ENABLED: "true"
       # A smaller pool than the API: the worker holds one short transaction
@@ -154,7 +156,7 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - certmonitor
+      - infrasight
     # Long enough for in-flight checks to finish and leases to be released.
     stop_grace_period: 45s
 
@@ -163,8 +165,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    image: certmonitor/frontend:${IMAGE_TAG:-latest}
-    container_name: certmonitor-frontend
+    image: infrasight/frontend:${IMAGE_TAG:-latest}
+    container_name: infrasight-frontend
     restart: unless-stopped
     ports:
       - "${HTTP_PORT:-8080}:80"
@@ -178,12 +180,12 @@ services:
       retries: 3
       start_period: 15s
     networks:
-      - certmonitor
+      - infrasight
 
 volumes:
   postgres_data:
     driver: local
 
 networks:
-  certmonitor:
+  infrasight:
     driver: bridge

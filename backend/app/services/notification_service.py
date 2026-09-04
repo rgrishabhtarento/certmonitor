@@ -191,7 +191,7 @@ def build_payload(alert: Alert) -> dict[str, Any]:
             else None
         ),
         "details": alert.details or {},
-        "source": "certmonitor",
+        "source": "infrasight",
     }
 
 
@@ -223,7 +223,7 @@ def _summary_fields(payload: dict[str, Any]) -> list[tuple[str, str]]:
 # --------------------------------------------------------------- delivery
 async def _deliver_webhook(config: dict[str, Any], payload: dict[str, Any]) -> None:
     body = json.dumps(payload, default=str).encode("utf-8")
-    headers = {"Content-Type": "application/json", "User-Agent": "CertMonitor/1.0"}
+    headers = {"Content-Type": "application/json", "User-Agent": "InfraSight/1.0"}
     headers.update(config.get("headers") or {})
 
     secret = config.get("secret")
@@ -233,6 +233,11 @@ async def _deliver_webhook(config: dict[str, Any], payload: dict[str, Any]) -> N
         signature = hmac.new(
             str(secret).encode("utf-8"), body, hashlib.sha256
         ).hexdigest()
+        headers["X-InfraSight-Signature"] = f"sha256={signature}"
+        # Sent alongside under the pre-rename name. A receiver written against
+        # CertMonitor verifies this header, and dropping it would silently
+        # break every existing webhook consumer on upgrade. Same value, so
+        # verifying either one is correct.
         headers["X-CertMonitor-Signature"] = f"sha256={signature}"
 
     async with httpx.AsyncClient(timeout=DELIVERY_TIMEOUT_SECONDS, trust_env=False) as client:
@@ -315,7 +320,7 @@ async def _deliver_pagerduty(config: dict[str, Any], payload: dict[str, Any]) ->
     # Recovery events resolve the incident PagerDuty already has open, keyed by
     # endpoint id, rather than creating a new one.
     is_recovery = payload["event"] == "endpoint_recovered"
-    dedup_key = f"certmonitor:{endpoint.get('id') or payload['alert_id']}"
+    dedup_key = f"infrasight:{endpoint.get('id') or payload['alert_id']}"
     body = {
         "routing_key": config["routing_key"],
         "event_action": "resolve" if is_recovery else "trigger",
@@ -323,7 +328,7 @@ async def _deliver_pagerduty(config: dict[str, Any], payload: dict[str, Any]) ->
         "payload": {
             "summary": payload["title"][:1024],
             "severity": _PAGERDUTY_SEVERITY.get(payload["severity"], "warning"),
-            "source": endpoint.get("hostname") or "certmonitor",
+            "source": endpoint.get("hostname") or "infrasight",
             "component": endpoint.get("name"),
             "group": endpoint.get("environment"),
             "class": payload["event"],
@@ -351,7 +356,7 @@ def _send_email_blocking(config: dict[str, Any], payload: dict[str, Any]) -> Non
         lines.extend([payload["message"], ""])
     for label, value in _summary_fields(payload):
         lines.append(f"{label}: {value}")
-    lines.extend(["", f"Occurred at: {payload['occurred_at']}", "", "-- CertMonitor"])
+    lines.extend(["", f"Occurred at: {payload['occurred_at']}", "", "-- InfraSight"])
     message.set_content("\n".join(lines))
 
     host = config["host"]
@@ -519,14 +524,14 @@ async def send_test_notification(channel: NotificationChannel) -> None:
     payload = {
         "event": "test",
         "severity": Severity.INFO.value,
-        "title": f"CertMonitor test notification ({channel.name})",
+        "title": f"InfraSight test notification ({channel.name})",
         "message": "If you can read this, the channel is configured correctly.",
         "occurred_at": datetime.now(timezone.utc).isoformat(),
         "alert_id": 0,
         "incident_id": None,
         "endpoint": None,
         "details": {"channel_type": channel.channel_type},
-        "source": "certmonitor",
+        "source": "infrasight",
     }
     config = decrypt_config(channel.config_encrypted)
     if config is None:

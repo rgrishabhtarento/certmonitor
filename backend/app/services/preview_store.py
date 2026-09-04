@@ -22,7 +22,7 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 TTL_SECONDS = 900  # 15 minutes: long enough to review a large preview
-_KEY_PREFIX = "certmonitor:import-preview:"
+_KEY_PREFIX = "infrasight:import-preview:"
 _MAX_LOCAL_ENTRIES = 64
 
 try:  # pragma: no cover - optional at runtime

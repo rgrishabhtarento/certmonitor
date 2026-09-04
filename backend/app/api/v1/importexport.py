@@ -55,7 +55,7 @@ async def import_template(_user: ImportEndpoints) -> Response:
         content=import_export_service.csv_template(),
         media_type="text/csv; charset=utf-8",
         headers={
-            "Content-Disposition": 'attachment; filename="certmonitor-import-template.csv"'
+            "Content-Disposition": 'attachment; filename="infrasight-import-template.csv"'
         },
     )
 
@@ -284,11 +284,11 @@ async def export_endpoints(
         media_type = (
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        filename = f"certmonitor-endpoints-{timestamp}.xlsx"
+        filename = f"infrasight-endpoints-{timestamp}.xlsx"
     else:
         content = import_export_service.export_csv(rows)
         media_type = "text/csv; charset=utf-8"
-        filename = f"certmonitor-endpoints-{timestamp}.csv"
+        filename = f"infrasight-endpoints-{timestamp}.csv"
 
     await audit_service.record(
         session,

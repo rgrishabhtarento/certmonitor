@@ -417,7 +417,7 @@ class TestDraft:
         response = await client.post(
             f"/api/rca/{created.json()['id']}/draft", headers=admin_headers
         )
-        assert "not measured by CertMonitor" in response.json()["impact"]
+        assert "not measured by InfraSight" in response.json()["impact"]
 
     async def test_the_timeline_is_built_from_real_events(
         self, client, admin_headers, incident

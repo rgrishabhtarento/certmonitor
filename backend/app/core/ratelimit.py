@@ -80,7 +80,7 @@ class RateLimiter:
     async def _hit_redis(
         self, client, key: str, *, limit: int, window_seconds: int
     ) -> RateLimitResult:
-        redis_key = f"certmonitor:ratelimit:{key}"
+        redis_key = f"infrasight:ratelimit:{key}"
         async with client.pipeline(transaction=True) as pipe:
             pipe.incr(redis_key, 1)
             pipe.ttl(redis_key)
@@ -132,7 +132,7 @@ class RateLimiter:
         client = await self._client()
         if client is not None:
             try:
-                await client.delete(f"certmonitor:ratelimit:{key}")
+                await client.delete(f"infrasight:ratelimit:{key}")
             except Exception:  # pragma: no cover
                 pass
         async with self._lock:

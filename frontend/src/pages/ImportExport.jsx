@@ -107,7 +107,7 @@ export default function ImportExport() {
       const stamp = new Date().toISOString().slice(0, 10)
       await downloadFile(
         `/api/export?format=${format}`,
-        `certmonitor-endpoints-${stamp}.${format}`,
+        `infrasight-endpoints-${stamp}.${format}`,
       )
       toast.success('Export downloaded.')
     } catch (err) {
@@ -119,7 +119,7 @@ export default function ImportExport() {
 
   const downloadTemplate = async () => {
     try {
-      await downloadFile('/api/import/template', 'certmonitor-import-template.csv')
+      await downloadFile('/api/import/template', 'infrasight-import-template.csv')
     } catch (err) {
       toast.error(err.message)
     }

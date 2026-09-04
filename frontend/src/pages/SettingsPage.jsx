@@ -60,7 +60,7 @@ const CHANNEL_TYPES = [
 const CHANNEL_FIELDS = {
   webhook: [
     { key: 'url', label: 'Webhook URL', required: true, placeholder: 'https://hooks.example.com/monitoring' },
-    { key: 'secret', label: 'Signing secret', type: 'password', hint: 'Optional. Adds an X-CertMonitor-Signature HMAC header.' },
+    { key: 'secret', label: 'Signing secret', type: 'password', hint: 'Optional. Adds an X-InfraSight-Signature HMAC header.' },
   ],
   slack: [{ key: 'webhook_url', label: 'Slack webhook URL', required: true, type: 'password' }],
   teams: [{ key: 'webhook_url', label: 'Teams webhook URL', required: true, type: 'password' }],

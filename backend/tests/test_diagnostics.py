@@ -225,7 +225,7 @@ class TestCommands:
         assert "openssl" in tls
 
     def test_container_commands_are_marked_conditional(self):
-        """CertMonitor cannot see whether a container is involved at all, so a
+        """InfraSight cannot see whether a container is involved at all, so a
         kubectl suggestion must not read as an observation."""
         entries = diagnostic_commands(self._Endpoint(), "upstream_unavailable")
         for entry in entries:

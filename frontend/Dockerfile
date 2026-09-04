@@ -24,7 +24,7 @@ RUN npm run build
 # ---------------------------------------------------------------- runtime
 FROM nginx:1.27-alpine AS runtime
 
-LABEL org.opencontainers.image.title="CertMonitor Frontend" \
+LABEL org.opencontainers.image.title="InfraSight Frontend" \
       org.opencontainers.image.description="Dashboard for endpoint and SSL monitoring"
 
 RUN apk add --no-cache curl

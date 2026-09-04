@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------ app
-    APP_NAME: str = "CertMonitor"
+    APP_NAME: str = "InfraSight"
     APP_ENV: Literal["development", "testing", "staging", "production"] = "production"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     ALLOWED_HOSTS: str = ""
 
     # ------------------------------------------------------------- database
-    DATABASE_URL: str = "postgresql+asyncpg://certmonitor:certmonitor@postgres:5432/certmonitor"
+    DATABASE_URL: str = "postgresql+asyncpg://infrasight:infrasight@postgres:5432/infrasight"
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_TIMEOUT: int = 30
