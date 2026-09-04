@@ -52,6 +52,7 @@ export default function UsersPage() {
     role: 'viewer',
     email: '',
     full_name: '',
+    team: '',
     is_active: true,
     must_change_password: true,
   })
@@ -99,6 +100,7 @@ export default function UsersPage() {
         ...form,
         email: form.email || null,
         full_name: form.full_name || null,
+        team: form.team || null,
       })
       toast.success(`User '${form.username}' created.`)
       setCreateOpen(false)
@@ -108,6 +110,7 @@ export default function UsersPage() {
         role: 'viewer',
         email: '',
         full_name: '',
+    team: '',
         is_active: true,
         must_change_password: true,
       })
@@ -485,6 +488,24 @@ export default function UsersPage() {
                 maxLength={128}
               />
             </Field>
+            <Field label="Team" hint="Free text, e.g. DevOps. Used for RCA ownership.">
+              <input
+                className="input"
+                value={form.team}
+                onChange={(event) => setForm({ ...form, team: event.target.value })}
+                maxLength={64}
+                placeholder="DevOps"
+              />
+            </Field>
+            <Field label="Team" hint="Free text, e.g. DevOps. Used for RCA ownership.">
+              <input
+                className="input"
+                value={form.team}
+                onChange={(event) => setForm({ ...form, team: event.target.value })}
+                maxLength={64}
+                placeholder="DevOps"
+              />
+            </Field>
             <Field label="E-mail">
               <input
                 type="email"
@@ -555,6 +576,7 @@ export default function UsersPage() {
                 role: formData.get('role'),
                 email: formData.get('email') || null,
                 full_name: formData.get('full_name') || null,
+                team: formData.get('team') || null,
                 is_active: formData.get('is_active') === 'on',
                 must_change_password: formData.get('must_change_password') === 'on',
               })
@@ -572,6 +594,15 @@ export default function UsersPage() {
                   className="input"
                   defaultValue={editing.full_name || ''}
                   maxLength={128}
+                />
+              </Field>
+              <Field label="Team" hint="Free text, e.g. DevOps. Used for RCA ownership.">
+                <input
+                  name="team"
+                  className="input"
+                  defaultValue={editing.team || ''}
+                  maxLength={64}
+                  placeholder="DevOps"
                 />
               </Field>
               <Field label="E-mail">

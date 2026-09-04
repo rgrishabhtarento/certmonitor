@@ -200,6 +200,12 @@ class AuditAction(StrEnum):
     NOTIFICATION_CHANNEL_DELETED = "notification_channel_deleted"
     ALERT_ACKNOWLEDGED = "alert_acknowledged"
     INCIDENT_UPDATED = "incident_updated"
+    INCIDENT_COMMENTED = "incident_commented"
+    RCA_REQUESTED = "rca_requested"
+    RCA_ASSIGNED = "rca_assigned"
+    RCA_UPDATED = "rca_updated"
+    RCA_COMPLETED = "rca_completed"
+    RCA_NOT_REQUIRED = "rca_not_required"
     CHANGE_CREATED = "change_created"
     CHANGE_UPDATED = "change_updated"
     CHANGE_SUBMITTED = "change_submitted"
@@ -338,3 +344,58 @@ class DiagnosisFocus(StrEnum):
     PERFORMANCE = "performance"
     RECENT_FAILURE = "recent_failure"
     DEPLOYMENT_IMPACT = "deployment_impact"
+
+
+# --------------------------------------------------------------- RCA
+class RcaStatus(StrEnum):
+    """Where a root-cause analysis has got to.
+
+    Deliberately parallel to, and independent of, the incident lifecycle. An
+    incident can be closed while its RCA is still pending - that combination
+    is normal and valid, and forcing them to move together is what makes RCA
+    processes get skipped.
+    """
+
+    NOT_REQUESTED = "not_requested"
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    NOT_REQUIRED = "not_required"
+
+
+OPEN_RCA_STATUSES = frozenset({RcaStatus.PENDING.value, RcaStatus.IN_PROGRESS.value})
+
+
+class RcaOwnerType(StrEnum):
+    """An RCA belongs to one person or to a team.
+
+    Teams are the free-text labels already used on endpoints rather than a new
+    entity - the application does not need a team table to answer "who owns
+    this", and adding one would be a migration and a management screen for no
+    extra capability.
+    """
+
+    INDIVIDUAL = "individual"
+    TEAM = "team"
+
+
+class RootCauseCategory(StrEnum):
+    """Optional classification, so recurring causes can be counted.
+
+    The value of a category is entirely in aggregation - "34% of our outages
+    are deployment-related" is actionable in a way that thirty individual
+    write-ups are not.
+    """
+
+    APPLICATION = "application"
+    INFRASTRUCTURE = "infrastructure"
+    NETWORK = "network"
+    DATABASE = "database"
+    DEPLOYMENT = "deployment"
+    CONFIGURATION = "configuration"
+    SSL_TLS = "ssl_tls"
+    SECURITY = "security"
+    DEPENDENCY = "dependency"
+    HUMAN_ERROR = "human_error"
+    EXTERNAL_DEPENDENCY = "external_dependency"
+    UNKNOWN = "unknown"

@@ -15,6 +15,8 @@ class UserRead(ORMModel):
     username: str
     email: str | None = None
     full_name: str | None = None
+    # Free-text team label, used for RCA ownership.
+    team: str | None = None
     role: str
     permissions: list[str] = Field(default_factory=list)
     is_active: bool
@@ -35,6 +37,10 @@ class UserCreate(BaseModel):
     role: str = Field(default=RoleName.VIEWER.value)
     email: EmailStr | None = None
     full_name: str | None = Field(default=None, max_length=128)
+    team: str | None = Field(
+        default=None, max_length=64,
+        description="Free-text team label, e.g. DevOps. Used for RCA ownership.",
+    )
     is_active: bool = True
     # New accounts start with a temporary password chosen by an admin, so the
     # user must replace it before doing anything else.
@@ -65,6 +71,10 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     email: EmailStr | None = None
     full_name: str | None = Field(default=None, max_length=128)
+    team: str | None = Field(
+        default=None, max_length=64,
+        description="Free-text team label, e.g. DevOps. Used for RCA ownership.",
+    )
     role: str | None = None
     is_active: bool | None = None
     must_change_password: bool | None = None

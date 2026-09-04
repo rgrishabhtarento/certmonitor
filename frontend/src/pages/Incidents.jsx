@@ -14,7 +14,8 @@ import {
   Spinner,
   StatusBadge,
 } from '../components/ui'
-import { endpointsApi, incidentsApi } from '../lib/api'
+import IncidentRcaPanel from '../components/IncidentRcaPanel'
+import { endpointsApi, incidentsApi, rcaApi } from '../lib/api'
 import {
   FAILURE_REASON_LABELS,
   formatDateTime,
@@ -41,6 +42,9 @@ export default function Incidents() {
 
   const [data, setData] = useState(null)
   const [filters, setFilters] = useState({ environments: [] })
+  // Existing team labels, so requesting an RCA offers them rather than
+  // inviting a fresh spelling of "DevOps" every time.
+  const [teams, setTeams] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState(null)
@@ -51,6 +55,10 @@ export default function Incidents() {
 
   useEffect(() => {
     endpointsApi.filters().then(setFilters).catch(() => {})
+    rcaApi
+      .options()
+      .then((data) => setTeams(data.teams || []))
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -411,6 +419,14 @@ export default function Incidents() {
                 </dd>
               </div>
             </dl>
+
+            {/* RCA sits inside the incident dialog, never as a gate in front
+                of it - resolving and closing stay untouched. */}
+            <IncidentRcaPanel
+              incidentId={selected.id}
+              canWrite={canWrite}
+              teams={teams}
+            />
 
             {selected.error_message ? (
               <div>

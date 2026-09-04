@@ -234,6 +234,7 @@ async def create_user(
     role_name: str,
     email: str | None = None,
     full_name: str | None = None,
+    team: str | None = None,
     is_active: bool = True,
     must_change_password: bool = True,
     created_by_id: uuid.UUID | None = None,
@@ -268,6 +269,7 @@ async def create_user(
         username=username,
         email=(email or "").strip() or None,
         full_name=(full_name or "").strip() or None,
+        team=(team or "").strip() or None,
         hashed_password=hash_password(password),
         role_id=role.id,
         is_active=is_active,
@@ -366,6 +368,12 @@ async def update_user(
         if new_name != user.full_name:
             changes["full_name"] = {"from": user.full_name, "to": new_name}
             user.full_name = new_name
+
+    if "team" in payload:
+        new_team = (payload["team"] or "").strip() or None
+        if new_team != user.team:
+            changes["team"] = {"from": user.team, "to": new_team}
+            user.team = new_team
 
     if "role" in payload and payload["role"]:
         role = await get_role(session, str(payload["role"]))

@@ -3,6 +3,7 @@ import {
   Bell,
   ClipboardList,
   Database,
+  FileSearch,
   Plus,
   RotateCcw,
   Save,
@@ -36,6 +37,7 @@ const CATEGORY_META = {
   ssl: { label: 'SSL certificates', icon: ShieldCheck },
   alerting: { label: 'Alerting', icon: Bell },
   changes: { label: 'Change management', icon: ClipboardList },
+  rca: { label: 'RCA', icon: FileSearch },
   retention: { label: 'Data retention', icon: Database },
   general: { label: 'General', icon: Server },
 }

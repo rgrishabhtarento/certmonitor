@@ -31,6 +31,8 @@ import {
   withSeriesLabels,
 } from '../components/charts'
 import { EmptyState, ErrorState, LoadingBlock, PageHeader, Spinner, StatusBadge } from '../components/ui'
+import InfraSearch from '../components/InfraSearch'
+import SmartSummary from '../components/SmartSummary'
 import { dashboardApi, endpointsApi } from '../lib/api'
 import {
   formatDuration,
@@ -212,6 +214,13 @@ export default function Dashboard() {
           </button>
         }
       />
+
+      {/* Locally computed operational intelligence, above the charts because
+          it answers "what needs my attention" - the question an operator
+          opens this page with. Everything in it is a count of real rows on
+          this server; nothing is sent anywhere. */}
+      <SmartSummary />
+      <InfraSearch />
 
       {/* One filter row above everything it scopes, so every chart below
           re-renders against the same slice. */}

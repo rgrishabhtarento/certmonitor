@@ -12,6 +12,13 @@ application.
 Its [Diagnose](#15-diagnose) feature investigates a failing endpoint layer by
 layer, ranks the probable causes against the evidence behind each, correlates
 with recent deployments and incidents, and says plainly what it cannot see.
+Alongside it, [RCA management](#16-rca-management) turns a resolved incident
+into a record worth keeping — optional, never blocking, and draftable from the
+data already collected.
+
+**No external AI is used or required.** Every piece of that intelligence is
+rules, statistics and correlation running on your own server. No API key, no
+outbound call, and no infrastructure data leaving the machine.
 
 It also carries a deliberately small [change management](#14-change-management)
 workflow — request, approve, deploy — whose point is that starting a deployment
@@ -44,15 +51,16 @@ Then open <http://localhost:8080> and sign in.
 13. [User management and RBAC](#13-user-management-and-rbac)
 14. [Change management](#14-change-management)
 15. [Diagnose](#15-diagnose)
-16. [API reference](#16-api-reference)
-17. [Local development](#17-local-development)
-18. [Testing](#18-testing)
-19. [Backup and recovery](#19-backup-and-recovery)
-20. [Production deployment](#20-production-deployment)
-21. [Kubernetes considerations](#21-kubernetes-considerations)
-22. [Troubleshooting](#22-troubleshooting)
-23. [Security notes](#23-security-notes)
-24. [Project structure](#24-project-structure)
+16. [RCA management](#16-rca-management)
+17. [API reference](#17-api-reference)
+18. [Local development](#18-local-development)
+19. [Testing](#19-testing)
+20. [Backup and recovery](#20-backup-and-recovery)
+21. [Production deployment](#21-production-deployment)
+22. [Kubernetes considerations](#22-kubernetes-considerations)
+23. [Troubleshooting](#23-troubleshooting)
+24. [Security notes](#24-security-notes)
+25. [Project structure](#25-project-structure)
 
 ---
 
@@ -265,7 +273,8 @@ docker compose exec backend alembic downgrade -1
 `endpoint_tags`, `tags`, `environments`, `monitoring_results`,
 `ssl_certificates`, `incidents`, `alerts`, `notification_channels`,
 `audit_logs`, `system_settings`, `worker_heartbeats`, `changes`,
-`change_endpoints`, `change_comments`, `change_activity`, `diagnoses`.
+`change_endpoints`, `change_comments`, `change_activity`, `diagnoses`,
+`rcas`, `incident_comments`.
 
 Indexes worth knowing about:
 
@@ -973,7 +982,201 @@ its uptime figures.
 
 ---
 
-## 16. API reference
+## 16. RCA management
+
+Lightweight root-cause analysis, and the operational intelligence that feeds
+it. All of it computed on this server, from this server's own database.
+
+### No external AI, and none needed
+
+There is no LLM, no API key, and no outbound call. The intelligence is rules,
+statistics, historical data, correlation, pattern detection and weighted
+scoring — the same engine described in [Diagnose](#15-diagnose). CertMonitor
+runs with no internet access beyond reaching the endpoints it monitors, and
+`docker compose up -d` still starts everything.
+
+That is a design choice, not a limitation. Infrastructure data — hostnames,
+topology, failure modes — never leaves the machine, and a diagnosis is
+reproducible: the same evidence always yields the same conclusion, which is
+what makes it auditable.
+
+### RCA is optional, and never in the way
+
+The single most important rule in this section. An RCA does not gate incident
+resolution, incident closure, deployment completion or monitoring restoration.
+Completing an RCA changes nothing about the incident.
+
+```
+Incident:  Detected → Investigating → Resolved → Closed
+RCA:       Not requested → Pending → In progress → Completed
+```
+
+Those run independently, so **Incident: CLOSED, RCA: PENDING** is a normal,
+valid state. A process that holds up recovery for paperwork is a process
+people learn to route around — and then the paperwork stops happening at all.
+
+Every incident offers three answers: **Request RCA**, **Not required**, or
+nothing at all. "Not required" is recorded with a reason, because *we looked
+and decided not to* is a different state from *nobody has looked*, and only the
+first should leave the pending queue.
+
+### Ownership without a new role or a team table
+
+An RCA belongs to a person **or** a team. Teams are the free-text labels
+already used on endpoints, now also on users — `DevOps`, `Platform`, `Backend`.
+No team table, no membership screen, no extra role.
+
+| Who | Can |
+|---|---|
+| Admin | Everything |
+| Anyone with `incident:write` | Request, assign, edit, complete |
+| **The assigned owner** | Edit and complete their own, whatever their role |
+| Anyone with `incident:read` | View, and comment |
+
+That third row is the point: a **viewer** assigned an RCA — personally, or via
+their team label — can complete it. Assigning work to someone who then cannot
+do it is the failure mode this avoids.
+
+### The form is deliberately small
+
+Incident · Owner · Root cause · Category · Impact · Resolution · Preventive
+actions · Timeline. Only **root cause** and **resolution** are required, and
+only to *complete* — partial work saves freely, because an RCA written over
+three days by two people is the common case.
+
+### Generate RCA draft
+
+Not AI-generated, and not called that. **Generate draft** assembles a starting
+point from records this server already holds:
+
+- the incident — timing, duration, failure reason, error, failed check count
+- the [Diagnose](#15-diagnose) verdict run while it was open, if there was one
+- the deployment that completed before it, and the gap in minutes
+- monitoring history either side, for a latency baseline
+- the incident comments
+
+Where the data does not support a statement it says so, in the same words every
+time:
+
+```
+Not available from monitoring data.
+```
+
+So an incident with no diagnosis produces a draft that says the cause was never
+established — rather than a confident guess that outlives the incident and
+misleads whoever reads it next. The banner says **"Generated from available
+monitoring and incident data. Review before saving."** and the owner edits it.
+
+### Timeline
+
+Built automatically from real events, and every entry names its source, so a
+derived fact never reads like something a person wrote:
+
+```
+23:30  Deployment      CHG-2026-0018 started by rishabh (Payment API)
+23:38  Deployment      CHG-2026-0018 completed
+23:42  Monitoring      Endpoint became unhealthy — Unexpected HTTP status 502
+23:44  Diagnose        Upstream unavailable (high confidence)
+23:50  Comment         amit: Rollback started
+23:53  Monitoring      Endpoint recovered, incident closed automatically
+```
+
+Editable afterwards — the parts a human remembers (when the rollback was
+decided, who was called) are exactly the ones no database holds.
+
+### Comments
+
+Incidents now have threaded comments. The investigation happens in
+conversation, and that conversation is the raw material of the RCA — keeping it
+on the incident rather than in chat means the owner inherits it instead of
+reconstructing it. Anyone who can see the incident can comment.
+
+### Reporting
+
+Built **only** from stored RCA records, so an empty section means nobody has
+written it yet — never that nothing happened.
+
+- Completion rate, and average days to complete
+- Top root-cause categories as a percentage
+- Incidents by owner and by application
+- Deployment-related share
+- **Recurring root causes** — grouped by the written cause, not just the
+  category, because "Database connection exhaustion" recorded five times by
+  three people is the most valuable pattern this data holds and is invisible if
+  you only count categories
+
+### Similar past incidents
+
+An RCA shows completed RCAs for comparable past incidents — same endpoint
+first, then same application. Labelled as historical context, never as
+evidence about the current one.
+
+### Endpoints
+
+```
+GET  /api/rca                         list, with search + status/application/category filters
+GET  /api/rca/dashboard               counts and the pending queue
+GET  /api/rca/analytics               reporting, from stored records only
+GET  /api/rca/options                 statuses, categories, teams, applications
+GET  /api/rca/{id}                    details, comments, similar past RCAs
+PUT  /api/rca/{id}                    save partial work
+POST /api/rca/{id}/assign             to a person or a team
+POST /api/rca/{id}/draft              generate a draft locally
+POST /api/rca/{id}/complete           requires root cause + resolution
+
+GET  /api/incidents/{id}/rca          null when none — the normal state
+POST /api/incidents/{id}/rca          request one
+POST /api/incidents/{id}/rca/not-required
+GET  /api/incidents/{id}/comments
+POST /api/incidents/{id}/comments
+```
+
+### Smart DevOps summary, and infrastructure search
+
+Both on the dashboard, both computed locally.
+
+The **summary** answers *what needs my attention* — a health score with its
+four measured components and the plain reasons behind it, counts of critical
+and degraded services, SSL attention, deployments, performance anomalies and
+pending RCAs, plus a prioritised attention list ordered by environment, failure
+kind and impact. Below it, a **daily operations summary** with what happened in
+the last 24 hours and the one finding worth leading with.
+
+**Search infrastructure** is a deterministic parser over a fixed vocabulary,
+not a language model:
+
+```
+production services that are down
+SSL certificates expiring in 30 days
+endpoints with latency above 1 second
+failed deployments this week
+incidents without RCA
+currently paused endpoints
+RCA pending for more than 7 days
+applications with recurring incidents
+```
+
+It shows **what it understood** above the results, so a misread question is
+obvious rather than silently wrong — and a question it does not recognise says
+so and lists what it can answer, instead of guessing. Nothing typed there
+leaves the server, and the same question always returns the same rows.
+
+### Configuration
+
+**Settings → RCA** and **Settings → Monitoring**:
+
+| Key | Default | What it does |
+|---|---|---|
+| `rca_reminder_days` | 7 | Highlight an RCA open longer than this |
+| `rca_default_due_days` | 0 | Default deadline; 0 means none, and an RCA with no deadline is never overdue |
+| `latency_anomaly_multiplier` | 3.0 | How much slower than baseline counts as degradation |
+| `recovery_checks_required` | 3 | Consecutive passing checks before calling something recovered |
+| `deployment_correlation_minutes` | 30 | Window for reporting a deployment/failure correlation |
+| `incident_grouping_minutes` | 15 | Window for treating repeated failures as one problem |
+
+---
+
+## 17. API reference
 
 Interactive docs: **<http://localhost:8080/api/docs>** (Swagger UI) and
 `/api/redoc`. Machine-readable: `/api/openapi.json`.
@@ -1048,7 +1251,7 @@ response to the full detail in the log; exception text is never echoed.
 
 ---
 
-## 17. Local development
+## 18. Local development
 
 ### Backend
 
@@ -1086,7 +1289,7 @@ Point it elsewhere with `VITE_API_TARGET=http://localhost:8000 npm run dev`.
 
 ---
 
-## 18. Testing
+## 19. Testing
 
 ```bash
 cd backend
@@ -1116,6 +1319,7 @@ and the JSON/BigInteger columns carry SQLite variants for exactly this reason.
 | `test_monitoring_state.py` | One incident per outage, recovery and downtime, alert generation, cooldown, certificate rotation, re-grading |
 | `test_endpoints_api.py` | CRUD, validation, duplicates, credential handling, filters, sorting, pagination, bulk actions |
 | `test_import_export.py` | Valid/invalid CSV, missing fields, duplicates, aliases, Excel, idempotent re-import, credential-free export |
+| `test_rca.py` | RCA never blocking the incident, team ownership without a new role, drafts that never invent a fact, and a search parser that refuses what it cannot parse |
 | `test_diagnostics.py` | The Diagnose reasoning layer: evidence ranking, confidence bands, severity classification, and the honesty rules that stop it inventing infrastructure it cannot see |
 | `test_health_and_settings.py` | Probes, security headers, settings validation, user management invariants, channels, OpenAPI completeness |
 | `test_changes.py` | The change workflow and its effect on monitoring: approval routing, self-approval refused, pause on deploy, resume on complete/fail, an already-paused endpoint left alone, concurrent-deployment conflict, activity timeline |
@@ -1126,7 +1330,7 @@ real X.509 material going through the same parsing path a live handshake uses.
 
 ---
 
-## 19. Backup and recovery
+## 20. Backup and recovery
 
 ### What to back up
 
@@ -1205,7 +1409,7 @@ docker compose up -d
 
 ---
 
-## 20. Production deployment
+## 21. Production deployment
 
 **Before going live**
 
@@ -1271,7 +1475,7 @@ replicas beyond that.
 
 ---
 
-## 21. Kubernetes considerations
+## 22. Kubernetes considerations
 
 The design already assumes it. Notes for a chart:
 
@@ -1338,7 +1542,7 @@ worker can finish in-flight checks and release its leases.
 
 ---
 
-## 22. Troubleshooting
+## 23. Troubleshooting
 
 **Everything: check the logs first.**
 
@@ -1449,7 +1653,7 @@ severity/event/environment/tag filters.
 
 ---
 
-## 23. Security notes
+## 24. Security notes
 
 - Passwords: bcrypt cost 12. Never logged, never returned, never exported.
 - Endpoint credentials and channel configs: Fernet-encrypted at rest,
@@ -1478,7 +1682,7 @@ severity/event/environment/tag filters.
 
 ---
 
-## 24. Project structure
+## 25. Project structure
 
 ```
 certmonitor/
@@ -1488,14 +1692,16 @@ certmonitor/
 │   │   └── versions/                     0001 initial schema,
 │   │                                     0002 change management,
 │   │                                     0003 health-path discovery,
-│   │                                     0004 diagnosis history
+│   │                                     0004 diagnosis history,
+│   │                                     0005 RCA management
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── deps.py                       auth, RBAC, pagination
 │   │   │   ├── health.py                     /health /ready /live /api/workers
 │   │   │   └── v1/                           auth, endpoints, dashboard,
 │   │   │                                     incidents, taxonomy, users,
-│   │   │                                     settings, importexport, changes
+│   │   │                                     settings, importexport, changes,
+│   │   │                                     rca + intelligence
 │   │   ├── core/                             config, database, security,
 │   │   │                                     logging, enums, ratelimit
 │   │   ├── models/                           SQLAlchemy models
@@ -1508,7 +1714,8 @@ certmonitor/
 │   │   ├── services/                         monitoring, stats, endpoints,
 │   │   │                                     users, alerts, notifications,
 │   │   │                                     import/export, retention, settings,
-│   │   │                                     diagnostics + reasoning, changes
+│   │   │                                     diagnostics + reasoning, changes,
+│   │   │                                     rca + draft, insights
 │   │   ├── workers/monitor_worker.py         the monitoring process
 │   │   ├── bootstrap.py                      first-boot seeding
 │   │   └── main.py                           app factory, middleware, handlers
@@ -1525,7 +1732,7 @@ certmonitor/
 │   │   ├── hooks/                            useAuth, useToast
 │   │   ├── layouts/AppLayout.jsx
 │   │   ├── lib/                              api client, formatters
-│   │   ├── pages/                            17 screens
+│   │   ├── pages/                            19 screens
 │   │   ├── App.jsx
 │   │   └── main.jsx
 │   ├── Dockerfile

@@ -326,6 +326,54 @@ export const changesApi = {
     api.post(`/changes/${id}/comments`, { body }).then((r) => r.data),
 }
 
+/**
+ * RCA and the local intelligence endpoints.
+ *
+ * All of this is computed on the server from its own database - no external
+ * service is involved, and nothing here sends infrastructure data anywhere.
+ */
+export const rcaApi = {
+  list: (params) =>
+    api.get('/rca', { params: cleanParams(params) }).then((r) => r.data),
+  dashboard: () => api.get('/rca/dashboard').then((r) => r.data),
+  analytics: (windowDays) =>
+    api
+      .get('/rca/analytics', { params: cleanParams({ window_days: windowDays }) })
+      .then((r) => r.data),
+  options: () => api.get('/rca/options').then((r) => r.data),
+  get: (id) => api.get(`/rca/${id}`).then((r) => r.data),
+  update: (id, payload) => api.put(`/rca/${id}`, payload).then((r) => r.data),
+  assign: (id, payload) => api.post(`/rca/${id}/assign`, payload).then((r) => r.data),
+  complete: (id) => api.post(`/rca/${id}/complete`).then((r) => r.data),
+  // Assembled from stored records, so it can take a moment on a busy incident.
+  draft: (id) =>
+    api.post(`/rca/${id}/draft`, null, { timeout: 60000 }).then((r) => r.data),
+
+  forIncident: (incidentId) =>
+    api.get(`/incidents/${incidentId}/rca`).then((r) => r.data),
+  request: (incidentId, payload) =>
+    api.post(`/incidents/${incidentId}/rca`, payload || {}).then((r) => r.data),
+  notRequired: (incidentId, reason) =>
+    api
+      .post(`/incidents/${incidentId}/rca/not-required`, { reason })
+      .then((r) => r.data),
+
+  comments: (incidentId) =>
+    api.get(`/incidents/${incidentId}/comments`).then((r) => r.data),
+  addComment: (incidentId, body) =>
+    api.post(`/incidents/${incidentId}/comments`, { body }).then((r) => r.data),
+}
+
+export const intelligenceApi = {
+  summary: () => api.get('/intelligence/summary').then((r) => r.data),
+  daily: (hours) =>
+    api
+      .get('/intelligence/daily', { params: cleanParams({ hours }) })
+      .then((r) => r.data),
+  search: (q) =>
+    api.get('/intelligence/search', { params: { q } }).then((r) => r.data),
+}
+
 export const taxonomyApi = {
   tags: () => api.get('/tags').then((r) => r.data),
   createTag: (payload) => api.post('/tags', payload).then((r) => r.data),

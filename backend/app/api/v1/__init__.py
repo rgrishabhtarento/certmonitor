@@ -9,6 +9,7 @@ from app.api.v1 import (
     endpoints,
     importexport,
     incidents,
+    rca,
     settings as settings_routes,
     taxonomy,
     users,
@@ -23,6 +24,9 @@ api_router.include_router(auth.router)
 api_router.include_router(endpoints.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(incidents.router)
+# RCA and the local intelligence endpoints. Registered after incidents so the
+# literal /incidents/{id}/rca paths resolve against the RCA router.
+api_router.include_router(rca.router)
 api_router.include_router(changes.router)
 api_router.include_router(taxonomy.router)
 api_router.include_router(users.router)

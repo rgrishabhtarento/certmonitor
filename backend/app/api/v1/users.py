@@ -171,6 +171,7 @@ async def create_user(
             role_name=payload.role,
             email=str(payload.email) if payload.email else None,
             full_name=payload.full_name,
+            team=payload.team,
             is_active=payload.is_active,
             must_change_password=payload.must_change_password,
             created_by_id=admin.id,

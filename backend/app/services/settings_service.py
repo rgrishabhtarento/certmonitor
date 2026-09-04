@@ -165,6 +165,88 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="latency_anomaly_multiplier",
+        value_type="float",
+        default=3.0,
+        category="monitoring",
+        label="Latency anomaly multiplier",
+        description=(
+            "How many times its own baseline an endpoint has to slow down "
+            "before it is reported as degraded. Below this it is treated as "
+            "normal variation rather than a finding."
+        ),
+        min_value=1.5,
+        max_value=50,
+    ),
+    SettingSpec(
+        key="recovery_checks_required",
+        value_type="int",
+        default=3,
+        category="monitoring",
+        label="Healthy checks required for recovery",
+        description=(
+            "How many consecutive passing checks a diagnosis asks for before "
+            "calling something resolved. One passing probe is not a recovery."
+        ),
+        min_value=1,
+        max_value=20,
+    ),
+    SettingSpec(
+        key="deployment_correlation_minutes",
+        value_type="int",
+        default=30,
+        category="monitoring",
+        label="Deployment correlation window (minutes)",
+        description=(
+            "A deployment finishing within this long before a failure begins "
+            "is reported as correlated. Always described as a correlation, "
+            "never as a confirmed cause."
+        ),
+        min_value=1,
+        max_value=1440,
+    ),
+    SettingSpec(
+        key="incident_grouping_minutes",
+        value_type="int",
+        default=15,
+        category="monitoring",
+        label="Incident grouping window (minutes)",
+        description=(
+            "Failures on one endpoint inside this window are treated as one "
+            "problem rather than several, which is what keeps a single outage "
+            "from producing a wall of alerts."
+        ),
+        min_value=1,
+        max_value=1440,
+    ),
+    SettingSpec(
+        key="rca_reminder_days",
+        value_type="int",
+        default=7,
+        category="rca",
+        label="RCA reminder period (days)",
+        description=(
+            "An open RCA older than this is highlighted. RCA is never "
+            "mandatory - this only surfaces a backlog, it does not chase it."
+        ),
+        min_value=1,
+        max_value=180,
+    ),
+    SettingSpec(
+        key="rca_default_due_days",
+        value_type="int",
+        default=0,
+        category="rca",
+        label="Default RCA due period (days)",
+        description=(
+            "Applied when an RCA is requested without a due date. Zero means "
+            "no default deadline, and an RCA without a deadline is never "
+            "overdue."
+        ),
+        min_value=0,
+        max_value=180,
+    ),
+    SettingSpec(
         key="alerts_enabled",
         value_type="bool",
         default=True,

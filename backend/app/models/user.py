@@ -69,6 +69,10 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     email: Mapped[str | None] = mapped_column(String(255), unique=True)
     full_name: Mapped[str | None] = mapped_column(String(128))
+    # Free-text team label, matching the convention already used on endpoints.
+    # It is what lets an RCA be owned by "DevOps" rather than by a person, and
+    # it needs no team table, membership screen or extra role to do that.
+    team: Mapped[str | None] = mapped_column(String(64), index=True)
 
     # Only ever a bcrypt digest; the plaintext never leaves the request scope.
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)

@@ -16,6 +16,8 @@ const SslCertificates = lazy(() => import('./pages/SslCertificates'))
 const Incidents = lazy(() => import('./pages/Incidents'))
 const Alerts = lazy(() => import('./pages/Alerts'))
 const Changes = lazy(() => import('./pages/Changes'))
+const Rca = lazy(() => import('./pages/Rca'))
+const RcaDetail = lazy(() => import('./pages/RcaDetail'))
 const ChangeDetail = lazy(() => import('./pages/ChangeDetail'))
 const TagsPage = lazy(() => import('./pages/TagsPage'))
 const EnvironmentsPage = lazy(() => import('./pages/EnvironmentsPage'))
@@ -154,6 +156,26 @@ export default function App() {
             <RequirePermission permission="change:read">
               <Suspense fallback={<RouteFallback />}>
                 <ChangeDetail />
+              </Suspense>
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="rca"
+          element={
+            <RequirePermission permission="incident:read">
+              <Suspense fallback={<RouteFallback />}>
+                <Rca />
+              </Suspense>
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="rca/:rcaId"
+          element={
+            <RequirePermission permission="incident:read">
+              <Suspense fallback={<RouteFallback />}>
+                <RcaDetail />
               </Suspense>
             </RequirePermission>
           }
