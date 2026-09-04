@@ -21,47 +21,78 @@ import {
 } from '../components/ui'
 import { rcaApi } from '../lib/api'
 import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
-import { useAuth } from '../hooks/useAuth'
 import { SLOW_INTERVAL, useAutoRefresh } from '../hooks/useAutoRefresh'
 
+// Scope only. State lives on the tiles and the status select - three
+// controls for one concept was what made them contradict each other.
 const TABS = [
   { id: 'all', label: 'All' },
   { id: 'mine', label: 'Mine' },
-  { id: 'open', label: 'Open' },
-  { id: 'completed', label: 'Completed' },
 ]
 
-function Tile({ label, value, tone = 'neutral', onClick, active }) {
-  const tones = {
-    neutral: 'text-slate-900 dark:text-slate-50',
-    warn: 'text-amber-600 dark:text-amber-400',
-    info: 'text-blue-600 dark:text-blue-400',
-    good: 'text-green-600 dark:text-green-400',
-    bad: 'text-red-600 dark:text-red-400',
-    muted: 'text-slate-500 dark:text-slate-400',
+const TILE_TONES = {
+  neutral: 'text-slate-900 dark:text-slate-50',
+  warn: 'text-amber-600 dark:text-amber-400',
+  info: 'text-blue-600 dark:text-blue-400',
+  good: 'text-green-600 dark:text-green-400',
+  bad: 'text-red-600 dark:text-red-400',
+  muted: 'text-slate-500 dark:text-slate-400',
+}
+
+/**
+ * A count, which may or may not be a filter.
+ *
+ * The distinction is the point. Previously every tile rendered as a button
+ * with a hover shadow while only two of the six did anything, so four of them
+ * invited a click and then ignored it. A tile that does not filter is now a
+ * plain div with no hover affordance and no `aria-pressed`, and one that does
+ * says so - including to a screen reader.
+ */
+function Tile({ label, value, tone = 'neutral', onClick, to, active, hint }) {
+  const body = (
+    <>
+      <span className="block truncate text-xs font-medium text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
+      <span className={clsx('block text-2xl font-semibold leading-tight', TILE_TONES[tone])}>
+        {value}
+      </span>
+      {hint ? (
+        <span className="mt-0.5 block truncate text-[11px] text-slate-400">{hint}</span>
+      ) : null}
+    </>
+  )
+
+  const base = 'card p-3 text-left'
+  const interactive = 'transition-shadow hover:shadow-md'
+
+  if (to) {
+    return (
+      <Link to={to} className={clsx(base, interactive)}>
+        {body}
+      </Link>
+    )
   }
+
+  if (!onClick) {
+    // Not a filter. No hover lift, so it does not promise a click it cannot
+    // honour.
+    return <div className={base}>{body}</div>
+  }
+
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-pressed={active}
-      className={clsx(
-        'card p-3 text-left transition-shadow hover:shadow-md',
-        active && 'ring-2 ring-brand-500',
-      )}
+      aria-pressed={Boolean(active)}
+      className={clsx(base, interactive, active && 'ring-2 ring-brand-500')}
     >
-      <span className="block truncate text-xs font-medium text-slate-500 dark:text-slate-400">
-        {label}
-      </span>
-      <span className={clsx('block text-2xl font-semibold leading-tight', tones[tone])}>
-        {value}
-      </span>
+      {body}
     </button>
   )
 }
 
 export default function Rca() {
-  const { user } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [tab, setTab] = useState(searchParams.get('tab') || 'all')
@@ -69,7 +100,14 @@ export default function Rca() {
   const [pageSize, setPageSize] = useState(25)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [overdueOnly, setOverdueOnly] = useState(false)
   const [category, setCategory] = useState('')
+
+  /** Tiles toggle: pressing the active one clears the filter. */
+  const toggleStatus = (value) => {
+    setOverdueOnly(false)
+    setStatusFilter((current) => (current === value ? '' : value))
+  }
 
   const [data, setData] = useState(null)
   const [board, setBoard] = useState(null)
@@ -102,13 +140,12 @@ export default function Rca() {
             page,
             page_size: pageSize,
             search,
+            // Tabs are *whose*; tiles and the select are *what state*. They
+            // used to overlap - a tab could silently override the status
+            // filter, so the Pending tile listed In progress rows too.
             mine: tab === 'mine' ? true : undefined,
-            status:
-              tab === 'open'
-                ? 'pending,in_progress'
-                : tab === 'completed'
-                  ? 'completed'
-                  : statusFilter || undefined,
+            status: statusFilter || undefined,
+            overdue: overdueOnly || undefined,
             category: category || undefined,
           }),
         )
@@ -119,7 +156,7 @@ export default function Rca() {
         setRefreshing(false)
       }
     },
-    [page, pageSize, search, tab, statusFilter, category],
+    [page, pageSize, search, tab, statusFilter, overdueOnly, category],
   )
 
   useEffect(() => {
@@ -134,7 +171,7 @@ export default function Rca() {
 
   useEffect(() => {
     setPage(1)
-  }, [tab, search, statusFilter, category, pageSize])
+  }, [tab, search, statusFilter, overdueOnly, category, pageSize])
 
   const items = data?.items || []
 
@@ -162,31 +199,51 @@ export default function Rca() {
       {/* --------------------------------------------------- overview */}
       {board ? (
         <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {/* Context, not a filter: this counts incidents, and the list
+              below holds RCAs. */}
           <Tile label="Total incidents" value={formatNumber(board.total_incidents)} />
+
+          {/* Also incidents rather than RCAs, so it cannot filter this list -
+              but it is the actionable number here, and the Incidents page is
+              where an RCA gets requested. */}
           <Tile
             label="No RCA record"
             value={formatNumber(board.not_requested)}
             tone="muted"
+            to="/incidents"
+            hint="Request from Incidents"
           />
+
           <Tile
             label="Pending"
             value={formatNumber(board.pending)}
             tone={board.pending > 0 ? 'warn' : 'neutral'}
-            active={tab === 'open'}
-            onClick={() => setTab('open')}
+            active={statusFilter === 'pending'}
+            onClick={() => toggleStatus('pending')}
           />
-          <Tile label="In progress" value={formatNumber(board.in_progress)} tone="info" />
+          <Tile
+            label="In progress"
+            value={formatNumber(board.in_progress)}
+            tone="info"
+            active={statusFilter === 'in_progress'}
+            onClick={() => toggleStatus('in_progress')}
+          />
           <Tile
             label="Completed"
             value={formatNumber(board.completed)}
             tone="good"
-            active={tab === 'completed'}
-            onClick={() => setTab('completed')}
+            active={statusFilter === 'completed'}
+            onClick={() => toggleStatus('completed')}
           />
           <Tile
             label="Overdue"
             value={formatNumber(board.overdue)}
             tone={board.overdue > 0 ? 'bad' : 'neutral'}
+            active={overdueOnly}
+            onClick={() => {
+              setOverdueOnly((value) => !value)
+              setStatusFilter('')
+            }}
           />
         </div>
       ) : null}
@@ -210,10 +267,9 @@ export default function Rca() {
                     ? 'border-brand-600 text-brand-700 dark:border-brand-400 dark:text-brand-300'
                     : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200',
                 )}
-                onClick={() => {
-                  setTab(item.id)
-                  setStatusFilter('')
-                }}
+                // Scope and status are independent now, so switching between
+                // All and Mine keeps whatever status filter is applied.
+                onClick={() => setTab(item.id)}
               >
                 {item.label}
               </button>
@@ -227,11 +283,16 @@ export default function Rca() {
                 onChange={setSearch}
                 placeholder="Search endpoint, cause, owner…"
               />
+              {/* Always enabled, and the same state the tiles drive - so
+                  picking a status here lights the matching tile, and pressing
+                  a tile moves this. One filter, two ways in. */}
               <select
                 className="input"
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-                disabled={tab === 'open' || tab === 'completed'}
+                onChange={(event) => {
+                  setOverdueOnly(false)
+                  setStatusFilter(event.target.value)
+                }}
                 aria-label="Filter by status"
               >
                 <option value="">Any status</option>
