@@ -171,6 +171,80 @@ One thing does change: the outbound `User-Agent` on checks is now
 `InfraSight/1.0`. If any monitored service allow-lists it by name, update that
 allow-list.
 
+#### Actually renaming the database
+
+The two lines above are the recommended route — they cost nothing and carry no
+risk. Do the following only if you want the storage renamed to match the
+product.
+
+**Before you start:** copy `JWT_SECRET` and `ENCRYPTION_KEY` from the old
+`.env` into the new one **unchanged**. Endpoint credentials and notification
+configuration are encrypted with a key derived from them; a fresh secret makes
+every stored credential permanently undecryptable, and no database restore
+will bring them back.
+
+```bash
+cd /opt/infrasight          # wherever the stack lives
+mkdir -p backups
+
+# 1. Find the running postgres container. Named certmonitor-postgres before
+#    the rename, infrasight-postgres after - so ask rather than assume.
+docker ps --format '{{.Names}}'
+
+# 2. Stop the writers, leave postgres up. pg_dump is consistent either way,
+#    but this avoids capturing a deployment that is halfway through.
+docker stop certmonitor-backend certmonitor-worker
+
+# 3. Dump. --no-owner and --no-acl drop the "OWNER TO certmonitor" statements,
+#    which would otherwise fail against a database owned by infrasight.
+docker exec certmonitor-postgres pg_dump \
+  -U certmonitor -d certmonitor -Fc --no-owner --no-acl \
+  > "backups/certmonitor-$(date +%F-%H%M).dump"
+
+ls -lh backups/            # a few hundred KB at minimum; 0 bytes means it failed
+
+# 4. Take the old stack down. WITHOUT -v, so certmonitor_postgres_data
+#    survives untouched as your rollback.
+docker compose -p certmonitor down
+
+# 5. Point .env at the new names, then bring up ONLY postgres so it creates
+#    the empty infrasight database.
+#      COMPOSE_PROJECT_NAME=infrasight
+#      POSTGRES_DB=infrasight
+#      POSTGRES_USER=infrasight
+docker compose up -d postgres
+docker compose logs -f postgres      # wait for "database system is ready"
+
+# 6. Restore into it.
+docker exec -i infrasight-postgres pg_restore \
+  -U infrasight -d infrasight --no-owner --no-acl \
+  < backups/certmonitor-<the file you just made>.dump
+
+# 7. Verify before starting anything else.
+docker exec infrasight-postgres psql -U infrasight -d infrasight -c \
+  "select count(*) as endpoints from endpoints;
+   select count(*) as results from monitoring_results;
+   select version_num from alembic_version;"
+
+# 8. Start the rest. The API applies any newer migrations on the way up.
+docker compose up -d
+docker compose logs -f backend
+```
+
+`pg_restore` prints warnings about roles and extensions it did not create.
+Those are expected with `--no-owner --no-acl`; what matters is the row counts
+in step 7 and a clean `migrations_applied` in step 8.
+
+**Rolling back** costs one line, because nothing destroyed the old volume:
+put `COMPOSE_PROJECT_NAME`, `POSTGRES_DB` and `POSTGRES_USER` back to
+`certmonitor`, then `docker compose up -d`.
+
+Once the new stack has run happily for a few days, reclaim the space:
+
+```bash
+docker volume rm certmonitor_postgres_data      # irreversible
+```
+
 
 
 ```bash
