@@ -277,6 +277,7 @@ export function ResponseTimeChart({ data, height = 240, mode }) {
           strokeWidth={2}
           fill="url(#respFill)"
           dot={false}
+          isAnimationActive={false}
           activeDot={{ r: 4, strokeWidth: 2, stroke: chrome.surface }}
           connectNulls
         />
@@ -352,6 +353,7 @@ export function UptimeChart({ data, slaTarget, height = 240, mode }) {
           stroke={series.s1}
           strokeWidth={2}
           dot={false}
+          isAnimationActive={false}
           activeDot={{ r: 4, strokeWidth: 2, stroke: chrome.surface }}
           connectNulls
         />
@@ -410,6 +412,7 @@ export function LatencyBreakdownChart({ data, height = 240, mode }) {
           stroke={series.s1}
           strokeWidth={2}
           dot={false}
+          isAnimationActive={false}
           activeDot={{ r: 4, strokeWidth: 2, stroke: chrome.surface }}
           connectNulls
         />
@@ -420,6 +423,7 @@ export function LatencyBreakdownChart({ data, height = 240, mode }) {
           stroke={series.s2}
           strokeWidth={2}
           dot={false}
+          isAnimationActive={false}
           activeDot={{ r: 4, strokeWidth: 2, stroke: chrome.surface }}
           connectNulls
         />
@@ -567,7 +571,13 @@ export function AvailabilityBars({ groups, height = 240, mode, metric = 'uptime_
             )
           }}
         />
-        <Bar dataKey={metric} name="Uptime" fill={series.s1} radius={[0, 4, 4, 0]}>
+        <Bar
+          dataKey={metric}
+          name="Uptime"
+          fill={series.s1}
+          radius={[0, 4, 4, 0]}
+          isAnimationActive={false}
+        >
           {/* Direct value labels outside the bar end: never clipped, and the
               value stays readable without a hover. */}
           <LabelList
@@ -582,6 +592,83 @@ export function AvailabilityBars({ groups, height = 240, mode, metric = 'uptime_
     </ResponsiveContainer>
   )
 }
+
+// ------------------------------------------------ failures over time (detail)
+/**
+ * When the failures happened, rather than how many there were in total.
+ *
+ * A count of 47 failed checks says nothing useful; 47 failures inside two
+ * adjacent buckets is an outage with a start and an end, and 47 spread evenly
+ * across three days is a flapping endpoint. Those are completely different
+ * problems and the total cannot tell them apart.
+ *
+ * Failed and degraded are stacked because they are the same axis - checks that
+ * did not fully succeed - and stacking keeps the total height readable as
+ * "how bad was that moment".
+ */
+export function FailuresOverTimeChart({ data, height = 200, mode }) {
+  const chrome = CHROME[mode]
+
+  if (!data?.length) return <NoData label="No checks recorded yet." />
+
+  const anyFailures = data.some(
+    (point) => (point.failed_checks || 0) + (point.degraded_checks || 0) > 0,
+  )
+  if (!anyFailures) {
+    return <NoData label="No failed or degraded checks in this window." />
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
+        <CartesianGrid stroke={chrome.grid} vertical={false} />
+        <XAxis dataKey="label" {...axisProps(chrome)} minTickGap={28} />
+        <YAxis {...axisProps(chrome)} width={40} allowDecimals={false} />
+        <Tooltip
+          cursor={{ fill: chrome.grid, opacity: 0.4 }}
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null
+            const point = payload[0].payload
+            return (
+              <TooltipShell
+                title={formatDateTime(point.timestamp, 'dd MMM HH:mm')}
+                rows={[
+                  {
+                    label: 'Failed',
+                    value: formatNumber(point.failed_checks || 0),
+                    color: STATUS.critical,
+                  },
+                  {
+                    label: 'Degraded',
+                    value: formatNumber(point.degraded_checks || 0),
+                    color: STATUS.warning,
+                  },
+                  { label: 'Checks run', value: formatNumber(point.checks || 0) },
+                ]}
+              />
+            )
+          }}
+        />
+        <Bar
+          dataKey="failed_checks"
+          name="Failed"
+          stackId="outcome"
+          fill={STATUS.critical}
+          isAnimationActive={false}
+        />
+        <Bar
+          dataKey="degraded_checks"
+          name="Degraded"
+          stackId="outcome"
+          fill={STATUS.warning}
+          radius={[3, 3, 0, 0]}
+          isAnimationActive={false}
+        />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
 
 // ------------------------------------------------------ SSL expiry buckets
 const BUCKET_TONE = (bucket) => {
@@ -639,7 +726,12 @@ export function SslExpiryChart({ buckets, height = 220, mode }) {
             )
           }}
         />
-        <Bar dataKey="count" name="Certificates" radius={[4, 4, 0, 0]}>
+        <Bar
+          dataKey="count"
+          name="Certificates"
+          radius={[4, 4, 0, 0]}
+          isAnimationActive={false}
+        >
           {data.map((bucket) => (
             <Cell key={bucket.bucket} fill={BUCKET_TONE(bucket.bucket)} />
           ))}
@@ -709,6 +801,7 @@ export function FailureBars({ endpoints, height = 220, mode }) {
           name="Failed checks"
           fill={STATUS.critical}
           radius={[0, 4, 4, 0]}
+          isAnimationActive={false}
         >
           <LabelList
             dataKey="failed_checks"

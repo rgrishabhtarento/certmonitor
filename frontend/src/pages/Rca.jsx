@@ -277,7 +277,7 @@ export default function Rca() {
               />
             ) : (
               <>
-                <div className={`table-wrap ${refreshing ? 'opacity-70' : ''}`}>
+                <div className="table-wrap">
                   <table className="table">
                     <thead>
                       <tr>

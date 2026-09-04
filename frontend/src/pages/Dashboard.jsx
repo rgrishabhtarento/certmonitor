@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  RefreshCw,
   ServerCog,
   ShieldAlert,
   ShieldCheck,
@@ -19,7 +18,9 @@ import {
   AvailabilityBars,
   ChartFrame,
   FailureBars,
+  FailuresOverTimeChart,
   GroupTable,
+  LatencyBreakdownChart,
   Legend,
   ResponseTimeChart,
   SeriesTable,
@@ -30,8 +31,9 @@ import {
   useChartMode,
   withSeriesLabels,
 } from '../components/charts'
-import { EmptyState, ErrorState, LoadingBlock, PageHeader, Spinner, StatusBadge } from '../components/ui'
+import { EmptyState, ErrorState, LoadingBlock, PageHeader, StatusBadge } from '../components/ui'
 import InfraSearch from '../components/InfraSearch'
+import LiveIndicator from '../components/LiveIndicator'
 import SmartSummary from '../components/SmartSummary'
 import { dashboardApi, endpointsApi } from '../lib/api'
 import {
@@ -155,9 +157,10 @@ export default function Dashboard() {
 
   // The charts are the heaviest queries on the page, so they refresh on the
   // slow cadence - the Smart Summary above them carries the urgent numbers.
-  useAutoRefresh(() => load({ silent: true, background: true }), {
-    interval: SLOW_INTERVAL,
-  })
+  const { lastRefreshedAt, refreshNow } = useAutoRefresh(
+    () => load({ silent: true, background: true }),
+    { interval: SLOW_INTERVAL },
+  )
 
   const summary = data?.summary
   const bucketSeconds = useMemo(() => {
@@ -211,19 +214,19 @@ export default function Dashboard() {
     <>
       <PageHeader
         title="Dashboard"
-        description={
-          data ? `Generated ${formatRelative(data.generated_at)}` : 'Infrastructure health'
-        }
+        description="Infrastructure health at a glance"
         actions={
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => load({ silent: true })}
-            disabled={refreshing}
-          >
-            {refreshing ? <Spinner size={15} /> : <RefreshCw size={15} />}
-            Refresh
-          </button>
+          <LiveIndicator
+            refreshing={refreshing}
+            // Falls back to when the server generated the payload, so the
+            // counter is honest before the first poll lands.
+            lastRefreshedAt={
+              lastRefreshedAt ||
+              (data?.generated_at ? new Date(data.generated_at) : null)
+            }
+            onRefresh={refreshNow}
+            showToggle
+          />
         }
       />
 
@@ -341,7 +344,11 @@ export default function Dashboard() {
           />
         </div>
       ) : (
-        <div className={clsx('space-y-4', refreshing && 'opacity-70 transition-opacity')}>
+        <div className="space-y-4">
+          {/* Nothing dims on refresh. Fading the page to 70% was feedback for
+              a manual press; with a poll every 30 seconds it became a strobe.
+              The refresh button spins and the indicator says "Updating…" —
+              that is enough, and it does not move the content. */}
           {/* ------------------------------------------------- KPI row */}
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
             <StatTile
@@ -517,6 +524,30 @@ export default function Dashboard() {
             </ChartFrame>
           </div>
 
+          {/* ---------------------------------- when, and which layer */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {/* A total of "47 failed checks" cannot distinguish one outage
+                from a week of flapping. The distribution over time can. */}
+            <ChartFrame
+              title="When checks failed"
+              subtitle="Failed and degraded per interval — a cluster is an outage, a spread is flapping"
+              table={<SeriesTable series={series} />}
+            >
+              <FailuresOverTimeChart data={series} mode={mode} />
+            </ChartFrame>
+
+            {/* Splits total response time into its phases, which is the
+                difference between "the network is slow" and "the application
+                is slow" - two answers that send you to different teams. */}
+            <ChartFrame
+              title="Latency breakdown"
+              subtitle="Average, maximum, and the DNS / connect / TLS phases beneath them"
+              table={<SeriesTable series={series} />}
+            >
+              <LatencyBreakdownChart data={series} mode={mode} />
+            </ChartFrame>
+          </div>
+
           {/* ------------------------------- distribution and SSL timeline */}
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <section className="card">
@@ -592,6 +623,21 @@ export default function Dashboard() {
               <AvailabilityBars groups={data.availability_by_tag} mode={mode} />
             </ChartFrame>
           </div>
+
+          {/* The API has always returned this and nothing rendered it. Team
+              is the grouping that maps to who gets called, which makes it the
+              one most likely to change what happens next. */}
+          {data.availability_by_team?.length ? (
+            <ChartFrame
+              title="Availability by team"
+              subtitle="Observed uptime over the selected window, grouped by owning team"
+              height={240}
+              autoHeight
+              table={<GroupTable groups={data.availability_by_team} groupLabel="Team" />}
+            >
+              <AvailabilityBars groups={data.availability_by_team} mode={mode} />
+            </ChartFrame>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <ChartFrame
