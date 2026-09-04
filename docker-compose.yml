@@ -122,13 +122,18 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     image: infrasight/backend:${IMAGE_TAG:-latest}
-    container_name: infrasight-worker
     restart: unless-stopped
-    # Stable hostname so the worker keeps one identity across restarts.
-    # Without it the container ID becomes the worker id, and every recreate
-    # orphans a heartbeat row. Scaling past one replica needs WORKER_ID set
-    # per replica instead.
-    hostname: infrasight-worker
+    # Deliberately NO container_name and NO hostname here. Both are
+    # single-instance settings: Docker refuses to scale a service that pins a
+    # container name, and a pinned hostname would give every replica the same
+    # worker id, collapsing three workers into one heartbeat row.
+    #
+    #   docker compose up -d --scale worker=3
+    #
+    # Each replica therefore takes its container ID as its worker id. That id
+    # changes when a container is replaced, which is fine: the worker deletes
+    # its own heartbeat row on clean shutdown, and any row left by a hard kill
+    # is retired by the next worker's startup sweep.
     command: ["worker"]
     env_file:
       - .env

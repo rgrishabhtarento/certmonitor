@@ -58,12 +58,17 @@ def _now() -> datetime:
 
 class MonitorWorker:
     def __init__(self) -> None:
-        # Identity must be STABLE across restarts, or every container recreate
-        # orphans a heartbeat row and /health reports "degraded" until that row
-        # ages out. The hostname is stable for a Compose service with an
-        # explicit `hostname:` and for a Kubernetes pod (its pod name), so a
-        # restart reuses its own row. Scaling past one replica per host needs
-        # an explicit WORKER_ID (in Kubernetes: metadata.name via fieldRef).
+        # Identity must be UNIQUE per running process - two workers sharing an
+        # id overwrite each other's heartbeat, so a scaled fleet reports as one
+        # worker and /health undercounts it. The hostname gives that for free:
+        # each Compose replica and each Kubernetes pod has its own.
+        #
+        # It is not stable across restarts, and does not need to be. A clean
+        # shutdown deletes this worker's own heartbeat row (see run()), and a
+        # row left behind by a hard kill is removed by the next worker's
+        # startup sweep in _heartbeat_loop. Set WORKER_ID explicitly only when
+        # you want a fixed name in the fleet view - it must then differ per
+        # replica (in Kubernetes: metadata.name via fieldRef).
         self.worker_id = (settings.WORKER_ID or socket.gethostname() or "worker")[:64]
         self.concurrency = max(1, settings.WORKER_CONCURRENCY)
         self._semaphore = asyncio.Semaphore(self.concurrency)
@@ -498,13 +503,21 @@ class MonitorWorker:
             await asyncio.gather(*tasks, return_exceptions=True)
 
             # Release anything still leased so a restart picks it up at once
-            # rather than after the lease expires.
+            # rather than after the lease expires, and retire our own heartbeat
+            # row in the same transaction. Deleting the row is what lets the
+            # worker id be the container ID: a replaced container leaves no
+            # orphan behind, so /health never counts a worker that has stopped.
             try:
                 async with SessionFactory() as session:
                     await session.execute(
                         update(Endpoint)
                         .where(Endpoint.leased_by == self.worker_id)
                         .values(lease_expires_at=None, leased_by=None)
+                    )
+                    await session.execute(
+                        delete(WorkerHeartbeat).where(
+                            WorkerHeartbeat.worker_id == self.worker_id
+                        )
                     )
                     await session.commit()
             except SQLAlchemyError as exc:  # pragma: no cover

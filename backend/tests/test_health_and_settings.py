@@ -49,6 +49,36 @@ class TestHealthProbes:
         assert body["monitoring_worker"] == "healthy"
         assert body["status"] == "healthy"
 
+    async def test_a_scaled_worker_fleet_reports_every_replica(
+        self, client, session
+    ):
+        """`--scale worker=3` must read as three workers, not one.
+
+        Each replica takes its container ID as its worker id, so a scaled
+        fleet writes one heartbeat row per process. Health counts them.
+        """
+        now = datetime.now(timezone.utc)
+        for container_id in ("a1b2c3d4e5f6", "b2c3d4e5f6a1", "c3d4e5f6a1b2"):
+            session.add(
+                WorkerHeartbeat(
+                    worker_id=container_id,
+                    started_at=now,
+                    last_seen_at=now,
+                    checks_completed=0,
+                    checks_failed=0,
+                    in_flight=0,
+                    version="1.0.0",
+                    hostname=container_id,
+                )
+            )
+        await session.commit()
+
+        response = await client.get("/health")
+        body = response.json()
+        assert body["monitoring_worker"] == "healthy"
+        assert body["status"] == "healthy"
+        assert "3 worker(s)" in response.text
+
     async def test_a_stale_heartbeat_degrades_health(self, client, session):
         session.add(
             WorkerHeartbeat(

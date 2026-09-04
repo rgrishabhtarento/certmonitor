@@ -302,12 +302,40 @@ docker compose pull               # refresh postgres/redis/nginx base images
 ### Scaling the worker
 
 ```bash
-docker compose up -d --scale worker=3
+docker compose up -d --scale worker=3     # three workers
+docker compose up -d --scale worker=1     # back to one
+docker compose ps worker                  # see the replicas
+docker compose logs -f worker             # follow all of them at once
 ```
 
-Safe by design: workers claim disjoint sets of endpoints via `SKIP LOCKED`.
-Remove `container_name: infrasight-worker` from the Compose file first, since
-a fixed container name prevents scaling.
+No configuration needed — the `worker` service pins neither a container name
+nor a hostname, so Compose is free to run as many replicas as you ask for.
+Each one takes its container ID as its worker id and gets its own card on the
+**System Resources** page, with its own CPU, memory and in-flight count.
+
+Safe by design: workers claim disjoint sets of endpoints with `SELECT … FOR
+UPDATE SKIP LOCKED` plus a short lease, so no endpoint is ever checked twice
+and a worker that dies mid-batch releases its endpoints when the lease
+expires. Nothing coordinates them; there is no leader.
+
+Two things worth knowing:
+
+* **Do not add `container_name:` to the worker.** Docker requires unique
+  container names, so pinning one makes `--scale` fail outright. The same
+  applies to `hostname:`, which would instead give every replica the *same*
+  worker id — three processes overwriting one heartbeat row, so the fleet
+  reports as a single worker.
+* **Watch the connection budget.** Each worker opens up to
+  `WORKER_DB_POOL_SIZE + WORKER_DB_MAX_OVERFLOW` (20 by default) PostgreSQL
+  connections. Three workers plus the API sit comfortably under the bundled
+  `max_connections=200`; if you scale much further, raise it or lower the
+  per-worker pool.
+
+Scale when checks are running late — the **System Resources** page showing
+in-flight counts sitting at the concurrency limit, or due endpoints backing
+up. One worker handles a large number of endpoints on its own, because a check
+spends almost all its time waiting on the network (`WORKER_CONCURRENCY`
+defaults to 50 simultaneous probes).
 
 ### Data persistence
 
@@ -1702,8 +1730,10 @@ sticky sessions and rate limits are per-pod.
 than running the `postgres` service.
 
 **Scaling** — the worker scales horizontally with no coordination (`SKIP
-LOCKED` + leases). Give each replica a distinct `WORKER_ID` (the pod name via
-`fieldRef: metadata.name` works well) so `/api/workers` is readable.
+LOCKED` + leases). A pod's hostname is already its pod name, so replicas get
+distinct worker ids with no configuration; set `WORKER_ID` explicitly (the pod
+name via `fieldRef: metadata.name`) only if you want to control the label
+shown in `/api/workers`.
 
 **Egress** — the worker needs outbound access to everything it monitors. Write
 `NetworkPolicy` egress rules accordingly; the API needs none.
