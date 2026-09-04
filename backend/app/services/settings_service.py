@@ -220,6 +220,60 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         max_value=1440,
     ),
     SettingSpec(
+        key="session_timeout_minutes",
+        value_type="int",
+        default=env_settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+        category="security",
+        label="Session timeout (minutes)",
+        description=(
+            "How long a sign-in lasts before the browser has to renew it. "
+            "Applies to sessions created from now on - anyone already signed "
+            "in keeps their current session until it expires."
+        ),
+        min_value=5,
+        max_value=1440,
+    ),
+    SettingSpec(
+        key="session_refresh_days",
+        value_type="int",
+        default=env_settings.REFRESH_TOKEN_EXPIRE_DAYS,
+        category="security",
+        label="Stay signed in for (days)",
+        description=(
+            "How long a browser can silently renew a session without the "
+            "password being entered again. Past this, signing in is required."
+        ),
+        min_value=1,
+        max_value=90,
+    ),
+    SettingSpec(
+        key="account_lockout_attempts",
+        value_type="int",
+        default=env_settings.ACCOUNT_LOCKOUT_ATTEMPTS,
+        category="security",
+        label="Failed attempts before lockout",
+        description=(
+            "Consecutive failed sign-ins that lock an account. An "
+            "administrator can clear a lockout immediately from the Users "
+            "page without waiting it out."
+        ),
+        min_value=3,
+        max_value=50,
+    ),
+    SettingSpec(
+        key="account_lockout_minutes",
+        value_type="int",
+        default=env_settings.ACCOUNT_LOCKOUT_MINUTES,
+        category="security",
+        label="Lockout duration (minutes)",
+        description=(
+            "How long an account stays locked after too many failed "
+            "attempts, if nobody clears it manually."
+        ),
+        min_value=1,
+        max_value=1440,
+    ),
+    SettingSpec(
         key="rca_reminder_days",
         value_type="int",
         default=7,

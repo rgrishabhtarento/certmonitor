@@ -849,10 +849,35 @@ digit and a symbol; must differ from the username and from the current
 password. Enforced identically in the API and mirrored live in the UI.
 
 Login is rate limited per source IP **and** per username, and the account locks
-after `ACCOUNT_LOCKOUT_ATTEMPTS` failures. Unknown-user and wrong-password
+after a configurable number of failures. Unknown-user and wrong-password
 produce an identical response so accounts cannot be enumerated, and a miss
 still spends comparable time hashing so response timing does not reveal
 existence.
+
+### Session timeout and lockouts
+
+**Settings → Security & sessions**, adjustable at runtime — no redeploy:
+
+| Key | Default | What it does |
+|---|---|---|
+| `session_timeout_minutes` | 60 | How long a sign-in lasts before the browser renews it |
+| `session_refresh_days` | 7 | How long a browser can renew silently before the password is needed again |
+| `account_lockout_attempts` | 8 | Consecutive failures that lock an account |
+| `account_lockout_minutes` | 15 | How long a lockout lasts if nobody clears it |
+
+The environment variables stay the fallback and the seeded default, so an
+instance that never opens this page behaves exactly as before.
+
+**Changing the timeout affects new sessions only.** A token already in a
+browser carries its own expiry inside it; shortening the setting cannot reach
+back and revoke it. What *does* revoke immediately is bumping the user's
+`token_version` — which a password reset, a role change or disabling the
+account already does.
+
+**To clear a lockout without waiting it out:** Users → the locked account →
+**Clear lockout**. That resets the counter and lets them sign in straight
+away, which is almost always what you want when someone is locked out and
+standing next to you.
 
 ### Audit log
 

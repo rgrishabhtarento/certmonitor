@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
@@ -63,7 +63,14 @@ function Tile({ icon: Icon, label, value, tone, to }) {
   )
 }
 
-export default function SmartSummary() {
+/**
+ * @param refreshSignal  Bump to reload. Lets the page that hosts this own a
+ *                       single refresh control rather than putting a second
+ *                       one here - two refresh buttons a few pixels apart
+ *                       raise the question of which half each one refreshes.
+ * @param showControls   False when the host renders its own indicator.
+ */
+export default function SmartSummary({ refreshSignal = 0, showControls = true }) {
   const [summary, setSummary] = useState(null)
   const [daily, setDaily] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -99,6 +106,18 @@ export default function SmartSummary() {
     load().catch(() => {})
   }, [load])
 
+  // The host's refresh control reaches this panel through a counter, so one
+  // button refreshes the whole page. Skipped on mount - the effect above
+  // already did the first load.
+  const mounted = useRef(false)
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true
+      return
+    }
+    load({ silent: true }).catch(() => {})
+  }, [refreshSignal, load])
+
   if (loading && !summary) {
     return (
       <div className="card mb-4 grid place-items-center p-8">
@@ -127,13 +146,15 @@ export default function SmartSummary() {
           Smart DevOps Summary
         </h2>
         <span className="text-xs text-slate-400">computed locally</span>
-        <LiveIndicator
-          className="ml-auto"
-          refreshing={refreshing}
-          lastRefreshedAt={lastRefreshedAt || generatedAt}
-          onRefresh={refreshNow}
-          showToggle
-        />
+        {showControls ? (
+          <LiveIndicator
+            className="ml-auto"
+            refreshing={refreshing}
+            lastRefreshedAt={lastRefreshedAt || generatedAt}
+            onRefresh={refreshNow}
+            showToggle
+          />
+        ) : null}
       </div>
 
       {/* ------------------------------------------------- health score */}

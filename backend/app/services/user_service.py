@@ -165,7 +165,10 @@ async def count_active_admins(session: AsyncSession, *, exclude: uuid.UUID | Non
 
 # ----------------------------------------------------------------- sign-in
 async def authenticate(
-    session: AsyncSession, username: str, password: str
+    session: AsyncSession,
+    username: str,
+    password: str,
+    config: dict | None = None,
 ) -> User:
     """Verify credentials, applying lockout rules.
 
@@ -173,7 +176,19 @@ async def authenticate(
     so the response cannot be used to enumerate accounts. Lockout is reported
     distinctly because the user genuinely needs to know why waiting is
     required.
+
+    Lockout thresholds come from the runtime settings when the caller supplies
+    them, so they are tunable from the Settings page; the environment values
+    stay the fallback.
     """
+    config = config or {}
+    lockout_attempts = int(
+        config.get("account_lockout_attempts") or settings.ACCOUNT_LOCKOUT_ATTEMPTS
+    )
+    lockout_minutes = int(
+        config.get("account_lockout_minutes") or settings.ACCOUNT_LOCKOUT_MINUTES
+    )
+
     user = await get_user_by_username(session, username)
 
     if user is None:
@@ -188,15 +203,13 @@ async def authenticate(
 
     if not verify_password(password, user.hashed_password):
         user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
-        if user.failed_login_attempts >= settings.ACCOUNT_LOCKOUT_ATTEMPTS:
-            user.locked_until = _now() + timedelta(
-                minutes=settings.ACCOUNT_LOCKOUT_MINUTES
-            )
+        if user.failed_login_attempts >= lockout_attempts:
+            user.locked_until = _now() + timedelta(minutes=lockout_minutes)
             user.failed_login_attempts = 0
             logger.warning(
                 "account_locked",
                 username=user.username,
-                minutes=settings.ACCOUNT_LOCKOUT_MINUTES,
+                minutes=lockout_minutes,
             )
         await session.flush()
         raise AuthError("Incorrect username or password.")

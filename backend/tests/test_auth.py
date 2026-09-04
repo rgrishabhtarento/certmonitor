@@ -333,3 +333,138 @@ class TestAuditTrail:
         )
         response = await client.get("/api/audit-logs", headers=admin_headers)
         assert "hunter2secret" not in response.text
+
+
+class TestConfigurableSessionTimeout:
+    """Session and lockout limits are tunable without a redeploy.
+
+    The environment values remain the fallback, so an instance that never
+    touches Settings behaves exactly as before.
+    """
+
+    async def test_the_timeout_setting_reaches_the_token(
+        self, client, admin_headers
+    ):
+        await client.put(
+            "/api/settings",
+            json={"updates": {"session_timeout_minutes": 15}},
+            headers=admin_headers,
+        )
+
+        response = await client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "Passwd@123"},
+        )
+        assert response.status_code == 200
+        # 15 minutes, not the 60-minute environment default.
+        assert response.json()["expires_in"] == 15 * 60
+
+    async def test_it_falls_back_to_the_environment_value(self, client):
+        """Untouched settings must not change existing behaviour."""
+        response = await client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "Passwd@123"},
+        )
+        assert response.json()["expires_in"] == 60 * 60
+
+    async def test_lowering_it_does_not_revoke_a_live_session(
+        self, client, admin_headers
+    ):
+        """A token already issued carries its own expiry.
+
+        Shortening the setting cannot reach back and shorten it - bumping the
+        user's token_version is what revokes, and a password reset or role
+        change already does that. Worth asserting so nobody assumes this
+        setting is a kill switch.
+        """
+        login = await client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "Passwd@123"},
+        )
+        token = login.json()["access_token"]
+
+        await client.put(
+            "/api/settings",
+            json={"updates": {"session_timeout_minutes": 5}},
+            headers=admin_headers,
+        )
+
+        still_valid = await client.get(
+            "/api/auth/me", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert still_valid.status_code == 200
+
+    async def test_the_lockout_threshold_is_configurable(
+        self, client, admin_headers, session
+    ):
+        from app.services import user_service
+
+        await user_service.create_user(
+            session,
+            username="lockme",
+            password="LockMePass@123",
+            role_name="viewer",
+            must_change_password=False,
+        )
+        await session.commit()
+
+        await client.put(
+            "/api/settings",
+            json={"updates": {"account_lockout_attempts": 3}},
+            headers=admin_headers,
+        )
+
+        for _ in range(3):
+            await client.post(
+                "/api/auth/login",
+                json={"username": "lockme", "password": "wrong-password"},
+            )
+
+        # The next attempt - even with the right password - is refused as
+        # locked rather than accepted.
+        response = await client.post(
+            "/api/auth/login",
+            json={"username": "lockme", "password": "LockMePass@123"},
+        )
+        assert response.status_code == 423
+
+    async def test_an_admin_can_clear_a_lockout_immediately(
+        self, client, admin_headers, session
+    ):
+        """The 'reset the timeout' path: nobody should have to wait out a
+        lockout when an administrator is available."""
+        from app.services import user_service
+
+        user = await user_service.create_user(
+            session,
+            username="lockme2",
+            password="LockMePass@123",
+            role_name="viewer",
+            must_change_password=False,
+        )
+        await session.commit()
+
+        await client.put(
+            "/api/settings",
+            json={"updates": {"account_lockout_attempts": 3}},
+            headers=admin_headers,
+        )
+        for _ in range(3):
+            await client.post(
+                "/api/auth/login",
+                json={"username": "lockme2", "password": "wrong-password"},
+            )
+
+        unlock = await client.put(
+            f"/api/users/{user.id}",
+            json={"unlock": True},
+            headers=admin_headers,
+        )
+        assert unlock.status_code == 200
+        assert unlock.json()["is_locked"] is False
+
+        response = await client.post(
+            "/api/auth/login",
+            json={"username": "lockme2", "password": "LockMePass@123"},
+        )
+        assert response.status_code == 200

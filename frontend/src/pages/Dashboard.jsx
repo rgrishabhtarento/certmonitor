@@ -113,6 +113,9 @@ export default function Dashboard() {
   const [filters, setFilters] = useState({ environments: [], tags: [] })
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  // Bumped by the page-level refresh so the Smart Summary reloads alongside
+  // the charts, from one control rather than two.
+  const [refreshSignal, setRefreshSignal] = useState(0)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -224,7 +227,14 @@ export default function Dashboard() {
               lastRefreshedAt ||
               (data?.generated_at ? new Date(data.generated_at) : null)
             }
-            onRefresh={refreshNow}
+            // The single refresh for this page: the charts, and the Smart
+            // Summary below, which reloads on the signal. Two buttons a few
+            // pixels apart only raised the question of which half each one
+            // was refreshing.
+            onRefresh={() => {
+              refreshNow()
+              setRefreshSignal((value) => value + 1)
+            }}
             showToggle
           />
         }
@@ -234,7 +244,7 @@ export default function Dashboard() {
           it answers "what needs my attention" - the question an operator
           opens this page with. Everything in it is a count of real rows on
           this server; nothing is sent anywhere. */}
-      <SmartSummary />
+      <SmartSummary refreshSignal={refreshSignal} showControls={false} />
       <InfraSearch />
 
       {/* One filter row above everything it scopes, so every chart below

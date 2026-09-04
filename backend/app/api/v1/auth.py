@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import jwt
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
@@ -20,7 +22,7 @@ from app.schemas.auth import (
     UserSummary,
 )
 from app.schemas.common import Message
-from app.services import audit_service, user_service
+from app.services import audit_service, settings_service, user_service
 from app.services.audit_service import client_ip
 from app.services.user_service import (
     AccountLocked,
@@ -47,23 +49,46 @@ def _user_summary(user) -> UserSummary:
     )
 
 
-def _issue_tokens(user) -> TokenResponse:
+def _issue_tokens(user, config: dict | None = None) -> TokenResponse:
+    """Mint an access/refresh pair.
+
+    Lifetimes come from the runtime settings when the caller has them, so an
+    administrator can change the session timeout from the Settings page
+    without a redeploy. The environment values remain the fallback and the
+    seeded default.
+
+    Only sessions created from here on pick up a new value - a token already
+    in a browser carries its own expiry, and shortening the setting cannot
+    reach back and revoke it. Bumping the user's `token_version` is what does
+    that, and that is what a password reset or a role change already does.
+    """
+    config = config or {}
+    access_minutes = int(
+        config.get("session_timeout_minutes")
+        or settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+    refresh_days = int(
+        config.get("session_refresh_days") or settings.REFRESH_TOKEN_EXPIRE_DAYS
+    )
+
     access_token, expires_at = create_token(
         str(user.id),
         "access",
         role=user.role_name,
         token_version=user.token_version or 0,
+        expires_delta=timedelta(minutes=access_minutes),
     )
     refresh_token, _ = create_token(
         str(user.id),
         "refresh",
         role=user.role_name,
         token_version=user.token_version or 0,
+        expires_delta=timedelta(days=refresh_days),
     )
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        expires_in=access_minutes * 60,
         expires_at=expires_at,
         must_change_password=user.must_change_password,
         user=_user_summary(user),
@@ -119,7 +144,12 @@ async def login(
             )
 
     try:
-        user = await user_service.authenticate(session, username, payload.password)
+        user = await user_service.authenticate(
+            session,
+            username,
+            payload.password,
+            await settings_service.load_settings(session),
+        )
     except AccountLocked as exc:
         await audit_service.record(
             session,
@@ -160,7 +190,7 @@ async def login(
     )
     await session.commit()
 
-    tokens = _issue_tokens(user)
+    tokens = _issue_tokens(user, await settings_service.load_settings(session))
     logger.info(
         "login_succeeded",
         username=user.username,
@@ -205,7 +235,7 @@ async def refresh(payload: RefreshRequest, session: DbSession) -> TokenResponse:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session is no longer valid. Please sign in again.",
         )
-    return _issue_tokens(user)
+    return _issue_tokens(user, await settings_service.load_settings(session))
 
 
 @router.post("/logout", response_model=Message, summary="Sign out")
@@ -293,4 +323,4 @@ async def change_password(
         request=request,
     )
     await session.commit()
-    return _issue_tokens(user)
+    return _issue_tokens(user, await settings_service.load_settings(session))
