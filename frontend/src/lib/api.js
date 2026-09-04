@@ -472,3 +472,8 @@ export async function downloadFile(url, filename) {
 export const healthApi = {
   health: () => axios.get('/health').then((r) => r.data),
 }
+
+/** InfraSight's own resource usage - measured locally, no Docker socket. */
+export const systemApi = {
+  resources: () => api.get('/system/resources').then((r) => r.data),
+}

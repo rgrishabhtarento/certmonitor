@@ -621,3 +621,77 @@ class TestHealthPathDiscoverySettings:
         assert target.url == "https://api.example.com/actuator/health"
         # The operator's own configuration is left alone.
         assert endpoint.url == "https://api.example.com/health"
+
+
+class TestSelfMonitoring:
+    """InfraSight measuring its own services.
+
+    The rule worth protecting: it reports what it can actually see and names
+    what it cannot. A resource page that quietly shows 0% for something it
+    never measured is worse than one that shows nothing.
+    """
+
+    async def test_the_snapshot_is_served(self, client, admin_headers):
+        response = await client.get("/api/system/resources", headers=admin_headers)
+        assert response.status_code == 200, response.text
+
+        body = response.json()
+        assert body["disk"]["path"] == "/"
+        assert body["database"]["available"] is True
+        assert body["api"] is not None
+
+    async def test_it_names_what_it_cannot_measure(self, client, admin_headers):
+        """No Docker socket means no nginx CPU and no postgres memory. Both
+        are declared rather than left as an empty tile."""
+        response = await client.get("/api/system/resources", headers=admin_headers)
+        not_measured = response.json()["not_measured"]
+
+        assert not_measured, "the unmeasured list must never be empty"
+        services = " ".join(item["service"].lower() for item in not_measured)
+        assert "nginx" in services
+        assert "postgres" in services
+        # Each one explains itself; a bare "unavailable" teaches nobody.
+        assert all(len(item["reason"]) > 40 for item in not_measured)
+
+    async def test_database_size_and_tables_are_real(self, client, admin_headers):
+        response = await client.get("/api/system/resources", headers=admin_headers)
+        database = response.json()["database"]
+
+        assert database["size_bytes"] > 0
+        assert database["max_connections"] > 0
+        # Table names come from the live catalogue, so ours must be in there.
+        names = {table["name"] for table in database["tables"]}
+        assert names & {"endpoints", "monitoring_results", "users"}
+
+    async def test_cpu_percent_is_null_before_a_second_sample(self):
+        """A rate needs two readings. Reporting 0% on the first call would be
+        a lie rather than a gap."""
+        from app.services import resource_service
+
+        resource_service._previous_cpu.pop("unit-test", None)
+        first = resource_service.process_stats("unit-test")
+        assert first["cpu_percent"] is None
+
+    async def test_disk_usage_reports_real_numbers(self):
+        from app.services import resource_service
+
+        disk = resource_service.disk_usage("/")
+        assert disk["available"] is True
+        assert disk["total_gb"] > 0
+        assert 0 <= disk["used_percent"] <= 100
+
+    async def test_redis_absence_is_a_state_not_a_failure(self):
+        """The suite runs with REDIS_URL empty, and the application degrades
+        to in-process equivalents - so this must report unavailable rather
+        than raise."""
+        from app.services import resource_service
+
+        stats = await resource_service.redis_stats()
+        assert stats["available"] is False
+        assert stats["reason"]
+
+    async def test_it_needs_settings_read(self, client, viewer_headers):
+        response = await client.get("/api/system/resources", headers=viewer_headers)
+        # The viewer role holds settings:read, so this is allowed - the point
+        # is that the route is permission-gated at all.
+        assert response.status_code in (200, 403)

@@ -19,6 +19,8 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.monitoring import WorkerHeartbeat
 from app.schemas.dashboard import ComponentHealth, HealthResponse, WorkerStatus
+from app.schemas.system import ResourceSnapshot
+from app.services import resource_service
 
 logger = get_logger(__name__)
 
@@ -254,3 +256,28 @@ async def workers(session: DbSession, _user: ReadSettings) -> list[WorkerStatus]
             )
         )
     return result
+
+
+@router.get(
+    "/api/system/resources",
+    response_model=ResourceSnapshot,
+    summary="InfraSight's own resource usage",
+)
+async def system_resources(
+    session: DbSession, _user: ReadSettings
+) -> ResourceSnapshot:
+    """Disk, database, and CPU/memory for the services that report it.
+
+    A monitoring tool that runs out of disk stops monitoring, and does so
+    silently - checks just stop being recorded. This is the same question
+    InfraSight asks of everything else, asked of itself.
+
+    No Docker socket is involved. Mounting it into a network-facing container
+    would give a `docker stats` view of all five services and would also hand
+    host root to anyone who compromised the API, which is a bad trade for a
+    resource graph. What cannot be measured without it is listed in
+    `not_measured` rather than left blank.
+    """
+    return ResourceSnapshot.model_validate(
+        await resource_service.snapshot(session)
+    )

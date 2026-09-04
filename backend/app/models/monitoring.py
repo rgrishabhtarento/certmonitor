@@ -178,3 +178,11 @@ class WorkerHeartbeat(Base):
     in_flight: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     version: Mapped[str | None] = mapped_column(String(32))
     hostname: Mapped[str | None] = mapped_column(String(128))
+
+    # Self-reported cgroup figures. The worker measures its own container and
+    # carries the numbers on the heartbeat it already writes, so the API can
+    # report worker resource use without any channel to the worker process -
+    # and without the Docker socket.
+    cpu_percent: Mapped[float | None] = mapped_column(Float)
+    memory_mb: Mapped[float | None] = mapped_column(Float)
+    memory_limit_mb: Mapped[float | None] = mapped_column(Float)

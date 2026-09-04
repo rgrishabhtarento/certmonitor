@@ -40,6 +40,7 @@ from app.models.monitoring import WorkerHeartbeat
 from app.services import (
     alert_service,
     monitoring_service,
+    resource_service,
     retention_service,
     settings_service,
 )
@@ -98,6 +99,11 @@ class MonitorWorker:
                         )
                     )
                 ).scalar_one_or_none()
+                # Measured here rather than by the API: only this process can
+                # read its own cgroup, and the heartbeat is already a row the
+                # API reads - so no extra channel is needed to report it.
+                resources = resource_service.process_stats("worker")
+
                 if row is None:
                     session.add(
                         WorkerHeartbeat(
@@ -109,6 +115,9 @@ class MonitorWorker:
                             in_flight=self._in_flight,
                             version=WORKER_VERSION,
                             hostname=platform.node()[:128],
+                            cpu_percent=resources["cpu_percent"],
+                            memory_mb=resources["memory_mb"],
+                            memory_limit_mb=resources["memory_limit_mb"],
                         )
                     )
                 else:
@@ -117,6 +126,13 @@ class MonitorWorker:
                     row.checks_failed = self._checks_failed
                     row.in_flight = self._in_flight
                     row.version = WORKER_VERSION
+                    # cpu_percent is None on the first heartbeat - a rate needs
+                    # two samples - so keep the previous value rather than
+                    # blanking a good reading.
+                    if resources["cpu_percent"] is not None:
+                        row.cpu_percent = resources["cpu_percent"]
+                    row.memory_mb = resources["memory_mb"]
+                    row.memory_limit_mb = resources["memory_limit_mb"]
                 await session.commit()
             except SQLAlchemyError as exc:
                 await session.rollback()

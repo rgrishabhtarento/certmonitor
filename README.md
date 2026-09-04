@@ -577,6 +577,36 @@ rather than waiting for each endpoint's next check.
 
 ## 11. How monitoring actually works
 
+### Watching itself
+
+**System Resources** (`/system`, needs `settings:read`) asks the same questions
+of InfraSight that InfraSight asks of everything else. A monitoring tool that
+runs out of disk stops monitoring, and it does so *silently* — checks simply
+stop being recorded.
+
+| | Reported | How |
+|---|---|---|
+| Disk free, and days of headroom | ✅ | The API container's root filesystem, which on the default Compose topology shares a host device with the postgres volume |
+| Database size, growth per day, largest tables, connections, cache hit ratio | ✅ | SQL against `pg_database_size`, `pg_class`, `pg_stat_database` |
+| API CPU and memory | ✅ | Its own cgroup |
+| Worker CPU and memory | ✅ | Each worker measures its own cgroup and carries the numbers on the heartbeat it already writes |
+| Redis memory, CPU, clients, keys | ✅ | `INFO` over the normal connection |
+| **nginx CPU and memory** | ❌ | Listed under "Not measured" |
+| **PostgreSQL process CPU and memory** | ❌ | Listed under "Not measured" |
+
+Those last two are the deliberate part. Mounting `/var/run/docker.sock` into
+the API would give a full `docker stats` view of all five services in about
+three lines — and would also hand host root to anyone who compromised a
+network-facing container. That is a bad trade for a resource graph, so
+InfraSight does without and **says which numbers it does not have** rather
+than leaving blank tiles that read like healthy zeros.
+
+The growth projection is the figure worth watching. "4.2 GB" says nothing on
+its own; "growing 180 MB/day, 61 days of headroom" is a date to act before.
+Once history reaches `DATA_RETENTION_DAYS` the deletions balance the inserts
+and the database stops growing, so the projection is only shown while it still
+means something.
+
 ### The worker loop
 
 1. **Claim** — `SELECT id … WHERE monitoring_enabled AND NOT is_paused AND
@@ -1813,7 +1843,8 @@ infrasight/
 │   │                                     0002 change management,
 │   │                                     0003 health-path discovery,
 │   │                                     0004 diagnosis history,
-│   │                                     0005 RCA management
+│   │                                     0005 RCA management,
+│   │                                     0006 worker resource stats
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── deps.py                       auth, RBAC, pagination
@@ -1852,7 +1883,7 @@ infrasight/
 │   │   ├── hooks/                            useAuth, useToast
 │   │   ├── layouts/AppLayout.jsx
 │   │   ├── lib/                              api client, formatters
-│   │   ├── pages/                            19 screens
+│   │   ├── pages/                            20 screens
 │   │   ├── App.jsx
 │   │   └── main.jsx
 │   ├── Dockerfile

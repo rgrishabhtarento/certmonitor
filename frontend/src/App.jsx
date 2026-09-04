@@ -25,6 +25,7 @@ const ImportExport = lazy(() => import('./pages/ImportExport'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const AuditLogs = lazy(() => import('./pages/AuditLogs'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
+const SystemResources = lazy(() => import('./pages/SystemResources'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
 function FullPageSpinner() {
@@ -232,6 +233,16 @@ export default function App() {
             <RequirePermission permission="settings:read">
               <Suspense fallback={<RouteFallback />}>
                 <SettingsPage />
+              </Suspense>
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="system"
+          element={
+            <RequirePermission permission="settings:read">
+              <Suspense fallback={<RouteFallback />}>
+                <SystemResources />
               </Suspense>
             </RequirePermission>
           }
