@@ -29,7 +29,10 @@ export default {
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
       },
       boxShadow: {
-        card: '0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 6px -1px rgb(0 0 0 / 0.06)',
+        // Slightly deeper than a hairline now that cards sit on a tinted
+        // ground rather than white - enough to read as raised, not enough to
+        // draw attention to itself.
+        card: '0 1px 2px 0 rgb(15 23 42 / 0.05), 0 2px 8px -2px rgb(15 23 42 / 0.08)',
       },
       animation: {
         'pulse-slow': 'pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',

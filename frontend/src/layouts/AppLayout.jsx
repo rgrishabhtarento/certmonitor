@@ -266,7 +266,7 @@ export default function AppLayout() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       {/* ------------------------------------------------------ top bar */}
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
+      <header className="sticky top-0 z-30 border-b border-slate-300/70 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
         <div className="flex h-14 items-center gap-3 px-3 sm:px-4">
           <button
             type="button"
@@ -380,7 +380,7 @@ export default function AppLayout() {
         {/* --------------------------------------------------- sidebar */}
         <aside
           className={clsx(
-            'sticky top-14 hidden h-[calc(100vh-3.5rem)] shrink-0 border-r border-slate-200 bg-white transition-[width] duration-150 lg:block dark:border-slate-800 dark:bg-slate-900',
+            'sticky top-14 hidden h-[calc(100vh-3.5rem)] shrink-0 border-r border-slate-300/70 bg-white transition-[width] duration-150 lg:block dark:border-slate-800 dark:bg-slate-900',
             railCollapsed ? 'w-16' : 'w-60',
           )}
         >
@@ -397,7 +397,7 @@ export default function AppLayout() {
               onMouseDown={() => setMobileOpen(false)}
               aria-hidden="true"
             />
-            <aside className="relative h-full w-64 border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+            <aside className="relative h-full w-64 border-r border-slate-300/70 bg-white dark:border-slate-800 dark:bg-slate-900">
               {sidebar(false)}
             </aside>
           </div>

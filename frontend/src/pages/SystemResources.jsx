@@ -34,29 +34,50 @@ import { LIVE_INTERVAL, useAutoRefresh } from '../hooks/useAutoRefresh'
  * tile that reads like a healthy zero.
  */
 
-function tone(percent, { warn = 75, bad = 90 } = {}) {
-  if (percent == null) return 'text-slate-500 dark:text-slate-400'
-  if (percent >= bad) return 'text-red-600 dark:text-red-400'
-  if (percent >= warn) return 'text-amber-600 dark:text-amber-400'
-  return 'text-green-600 dark:text-green-400'
+/**
+ * Which band a percentage falls into.
+ *
+ * `higherIsBetter` matters more than it looks. Most meters here measure
+ * consumption, where high is bad - disk, memory, connections. A cache hit
+ * ratio is the opposite: 99.99% is excellent, and painting it red because the
+ * number is large turns the healthiest reading on the page into an alarm.
+ */
+function band(percent, { warn = 75, bad = 90, higherIsBetter = false } = {}) {
+  if (percent == null) return 'unknown'
+  if (higherIsBetter) {
+    if (percent <= bad) return 'bad'
+    if (percent <= warn) return 'warn'
+    return 'good'
+  }
+  if (percent >= bad) return 'bad'
+  if (percent >= warn) return 'warn'
+  return 'good'
 }
 
-function barTone(percent, { warn = 75, bad = 90 } = {}) {
-  if (percent == null) return 'bg-slate-300 dark:bg-slate-600'
-  if (percent >= bad) return 'bg-red-500'
-  if (percent >= warn) return 'bg-amber-500'
-  return 'bg-green-500'
+const TEXT_TONE = {
+  good: 'text-green-600 dark:text-green-400',
+  warn: 'text-amber-600 dark:text-amber-400',
+  bad: 'text-red-600 dark:text-red-400',
+  unknown: 'text-slate-500 dark:text-slate-400',
+}
+
+const BAR_TONE = {
+  good: 'bg-green-500',
+  warn: 'bg-amber-500',
+  bad: 'bg-red-500',
+  unknown: 'bg-slate-300 dark:bg-slate-600',
 }
 
 /** A usage bar. Never colour alone - the figure is always beside it. */
 function Meter({ label, percent, detail, thresholds }) {
+  const level = band(percent, thresholds)
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
           {label}
         </span>
-        <span className={clsx('tnum text-sm font-semibold', tone(percent, thresholds))}>
+        <span className={clsx('tnum text-sm font-semibold', TEXT_TONE[level])}>
           {percent == null ? 'not reported' : `${percent}%`}
         </span>
       </div>
@@ -67,7 +88,7 @@ function Meter({ label, percent, detail, thresholds }) {
       >
         {percent != null ? (
           <div
-            className={clsx('h-full rounded-full', barTone(percent, thresholds))}
+            className={clsx('h-full rounded-full', BAR_TONE[level])}
             style={{ width: `${Math.min(100, Math.max(2, percent))}%` }}
           />
         ) : null}
@@ -286,11 +307,13 @@ export default function SystemResources() {
               />
 
               <div className="mt-3">
+                {/* Higher is better here, unlike every other meter on this
+                    page. Without the flag, a perfect 99.99% renders red. */}
                 <Meter
                   label="Cache hit ratio"
                   percent={database.cache_hit_percent}
                   detail="Below about 99% usually means shared_buffers is too small for the working set."
-                  thresholds={{ warn: 0, bad: 0 }}
+                  thresholds={{ higherIsBetter: true, warn: 99, bad: 95 }}
                 />
               </div>
 

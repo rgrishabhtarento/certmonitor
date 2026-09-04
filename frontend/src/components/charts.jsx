@@ -55,8 +55,16 @@ export const STATUS = {
 
 // Chart chrome. Grid and axis rules are solid hairlines one shade off the
 // surface - never dashed.
+/**
+ * Chart furniture, stepped to the surface each theme paints on.
+ *
+ * The light values are cool rather than warm: they sit on the blue-tinted
+ * ground the rest of the light theme uses, and a beige grid against it read
+ * as a mismatch. Everything here is chrome - grid, axes, labels - and stays
+ * recessive so the data carries the contrast.
+ */
 const CHROME = {
-  light: { grid: '#e1e0d9', axis: '#c3c2b7', muted: '#898781', surface: '#ffffff' },
+  light: { grid: '#dde4ee', axis: '#a8b4c6', muted: '#64748b', surface: '#ffffff' },
   dark: { grid: '#2c2c2a', axis: '#383835', muted: '#898781', surface: '#0f172a' },
 }
 

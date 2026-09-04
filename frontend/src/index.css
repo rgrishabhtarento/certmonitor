@@ -4,20 +4,36 @@
 
 /* Design tokens. Defined once here so light and dark themes stay consistent
    and every component reads the same variables. */
+/*
+ * Light mode is built on a tinted ground rather than white.
+ *
+ * With a white page, white cards and white tables, every surface sat at the
+ * same value: nothing separated, and the whole screen read as one bright
+ * sheet. Dropping the page to a soft blue-grey and leaving cards white gives
+ * the panels something to lift off, which is what makes a dense operations
+ * screen legible for an eight-hour shift.
+ *
+ * The neutrals are pulled slightly toward the brand blue rather than being
+ * pure grey, so the palette reads as coloured without anything shouting.
+ */
 @layer base {
   :root {
     --surface: 255 255 255;
     --surface-raised: 255 255 255;
-    --surface-sunken: 248 250 252;
-    --border: 226 232 240;
+    /* Page ground: a touch of blue in the grey, dark enough that white cards
+       read as raised without needing a heavy shadow. */
+    --surface-sunken: 233 238 246;
+    --surface-muted: 241 245 251;
+    --border: 214 223 237;
     --text: 15 23 42;
-    --text-muted: 100 116 139;
+    --text-muted: 90 105 130;
   }
 
   .dark {
     --surface: 15 23 42;
     --surface-raised: 30 41 59;
     --surface-sunken: 2 6 23;
+    --surface-muted: 30 41 59;
     --border: 51 65 85;
     --text: 241 245 249;
     --text-muted: 148 163 184;
@@ -28,7 +44,8 @@
   }
 
   body {
-    @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+    background-color: rgb(var(--surface-sunken));
+    @apply text-slate-900 antialiased dark:text-slate-100;
     font-feature-settings: 'cv11', 'ss01';
   }
 
@@ -45,12 +62,20 @@
 }
 
 @layer components {
+  /* White against the tinted ground, so panels read as raised from the
+     page rather than merging into it. */
   .card {
-    @apply rounded-xl border border-slate-200 bg-white shadow-card dark:border-slate-800 dark:bg-slate-900;
+    @apply rounded-xl border bg-white shadow-card dark:border-slate-800 dark:bg-slate-900;
+    border-color: rgb(var(--border));
   }
 
+  /* A faintly tinted strip, so a card header is distinguishable from the
+     content under it without needing a heavier rule. */
   .card-header {
-    @apply flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800;
+    @apply flex items-center justify-between gap-3 rounded-t-xl border-b px-4 py-3
+           dark:border-slate-800 dark:bg-slate-900;
+    border-color: rgb(var(--border));
+    background-color: rgb(var(--surface-muted) / 0.7);
   }
 
   .card-title {
@@ -118,32 +143,40 @@
      utility at 0,1,0 - meaning no header could ever opt out of text-left,
      and every numeric column ended up with a left-aligned header sitting
      above right-aligned values. With :where(), per-cell utilities win. */
+  /* Tinted, and the label picks up the brand hue: a header row should be
+     obviously a header, not white text furniture on a white table. */
   :where(.table thead th) {
-    @apply sticky top-0 z-10 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-3 py-2
+    @apply sticky top-0 z-10 whitespace-nowrap border-b px-3 py-2
            text-left text-xs font-semibold uppercase tracking-wide text-slate-600
            dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400;
+    border-color: rgb(var(--border));
+    background-color: rgb(var(--surface-muted));
   }
 
   :where(.table tbody td) {
     @apply border-b border-slate-100 px-3 py-2 align-middle dark:border-slate-800/70;
   }
 
+  /* Brand-tinted rather than grey, so the row under the cursor is
+     unmistakable while scanning a long table. */
   :where(.table tbody tr):hover {
-    @apply bg-slate-50/80 dark:bg-slate-800/40;
+    @apply bg-brand-50/70 dark:bg-slate-800/40;
   }
 
   .badge {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
   }
 
+  /* Chips label a lot of rows, so a faint brand tint carries them without
+     adding another grey to an already grey table. */
   .chip {
-    @apply inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px]
-           font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300;
+    @apply inline-flex items-center gap-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px]
+           font-medium text-brand-800 dark:bg-slate-800 dark:text-slate-300;
   }
 
   .nav-link {
     @apply flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600
-           transition-colors hover:bg-slate-100 hover:text-slate-900
+           transition-colors hover:bg-brand-50 hover:text-brand-700
            dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
   }
 
