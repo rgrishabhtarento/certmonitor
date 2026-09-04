@@ -16,6 +16,7 @@ import {
 import { alertsApi, settingsApi } from '../lib/api'
 import { ALERT_TYPE_LABELS, formatDateTime, formatRelative, humanise } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
+import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { useToast } from '../hooks/useToast'
 
 const DELIVERY_TONE = {
@@ -84,6 +85,13 @@ export default function Alerts() {
     load()
     loadCounts()
   }, [load, loadCounts])
+
+  // Paused while rows are selected, so an acknowledge is never applied to a
+  // list that shifted underneath the selection.
+  useAutoRefresh(
+    () => Promise.all([load({ silent: true }), loadCounts()]),
+    { paused: selected.size > 0 },
+  )
 
   useEffect(() => {
     setPage(1)

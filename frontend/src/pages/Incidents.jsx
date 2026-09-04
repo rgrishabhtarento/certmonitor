@@ -25,6 +25,7 @@ import {
   humanise,
 } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
+import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { useToast } from '../hooks/useToast'
 
 export default function Incidents() {
@@ -93,6 +94,10 @@ export default function Incidents() {
   useEffect(() => {
     load()
   }, [load])
+
+  // Paused while the incident dialog is open: the notes textarea and the RCA
+  // comment box below it are mid-edit, and the panel does its own polling.
+  useAutoRefresh(() => load({ silent: true }), { paused: Boolean(selected) })
 
   useEffect(() => {
     setPage(1)

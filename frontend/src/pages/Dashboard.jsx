@@ -43,6 +43,7 @@ import {
   humanise,
   FAILURE_REASON_LABELS,
 } from '../lib/format'
+import { SLOW_INTERVAL, useAutoRefresh } from '../hooks/useAutoRefresh'
 import { useToast } from '../hooks/useToast'
 
 const WINDOWS = [
@@ -120,7 +121,7 @@ export default function Dashboard() {
   }, [])
 
   const load = useCallback(
-    async ({ silent = false } = {}) => {
+    async ({ silent = false, background = false } = {}) => {
       if (silent) setRefreshing(true)
       else setLoading(true)
       setError(null)
@@ -134,7 +135,12 @@ export default function Dashboard() {
         setData(payload)
       } catch (err) {
         setError(err)
-        if (silent) toast.error(`Could not refresh the dashboard: ${err.message}`)
+        // A failed *background* poll stays quiet. Toasting every 30 seconds
+        // during a backend blip would bury the screen in notifications about
+        // something the user never asked for.
+        if (silent && !background) {
+          toast.error(`Could not refresh the dashboard: ${err.message}`)
+        }
       } finally {
         setLoading(false)
         setRefreshing(false)
@@ -146,6 +152,12 @@ export default function Dashboard() {
   useEffect(() => {
     load()
   }, [load])
+
+  // The charts are the heaviest queries on the page, so they refresh on the
+  // slow cadence - the Smart Summary above them carries the urgent numbers.
+  useAutoRefresh(() => load({ silent: true, background: true }), {
+    interval: SLOW_INTERVAL,
+  })
 
   const summary = data?.summary
   const bucketSeconds = useMemo(() => {

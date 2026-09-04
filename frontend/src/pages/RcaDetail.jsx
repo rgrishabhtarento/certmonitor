@@ -30,7 +30,9 @@ import {
   PageHeader,
   Spinner,
 } from '../components/ui'
+import LiveIndicator from '../components/LiveIndicator'
 import { rcaApi, usersApi } from '../lib/api'
+import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { formatDateTime } from '../lib/format'
 import { useToast } from '../hooks/useToast'
 
@@ -87,6 +89,14 @@ export default function RcaDetail() {
       setError(err.message)
     }
   }, [rcaId, hydrate])
+
+  // `hydrate` replaces the form, so this must NEVER run over unsaved work.
+  // Losing a half-written root cause to a background poll would be far worse
+  // than not seeing a new comment for a minute, so `dirty` hard-stops it -
+  // and the manual Refresh stays available for when the user is ready.
+  const { refreshing, lastRefreshedAt, refreshNow } = useAutoRefresh(load, {
+    paused: dirty || busy || assignOpen || confirmComplete,
+  })
 
   useEffect(() => {
     load()
@@ -169,6 +179,12 @@ export default function RcaDetail() {
         }
         actions={
           <>
+            <LiveIndicator
+              refreshing={refreshing}
+              lastRefreshedAt={lastRefreshedAt}
+              onRefresh={refreshNow}
+              showToggle
+            />
             {rca.can_assign ? (
               <button
                 type="button"

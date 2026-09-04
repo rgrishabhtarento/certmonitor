@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardList,
-  RefreshCw,
   Rocket,
   ShieldCheck,
   Sparkles,
@@ -16,8 +15,9 @@ import clsx from 'clsx'
 
 import { PRIORITY_STYLE } from './rca'
 import { Spinner } from './ui'
+import LiveIndicator from './LiveIndicator'
 import { intelligenceApi } from '../lib/api'
-import { formatRelative } from '../lib/format'
+import { SLOW_INTERVAL, useAutoRefresh } from '../hooks/useAutoRefresh'
 
 /**
  * Smart DevOps summary: what needs attention, right now.
@@ -82,13 +82,21 @@ export default function SmartSummary() {
       setDaily(day)
     } catch (err) {
       setError(err.message)
+      throw err
     } finally {
       setLoading(false)
     }
   }, [])
 
+  // The heavier of the two aggregate queries, so this polls on the slow
+  // cadence rather than the conversational one.
+  const { refreshing, lastRefreshedAt, refreshNow } = useAutoRefresh(
+    () => load({ silent: true }),
+    { interval: SLOW_INTERVAL },
+  )
+
   useEffect(() => {
-    load()
+    load().catch(() => {})
   }, [load])
 
   if (loading && !summary) {
@@ -107,6 +115,10 @@ export default function SmartSummary() {
   }
   if (!summary) return null
 
+  // Before the first poll lands, fall back to when the server generated the
+  // payload - so the counter is honest rather than blank.
+  const generatedAt = summary.generated_at ? new Date(summary.generated_at) : null
+
   return (
     <section className="mb-5" aria-label="Smart DevOps summary">
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -114,16 +126,14 @@ export default function SmartSummary() {
           <Sparkles size={16} className="text-brand-600 dark:text-brand-400" />
           Smart DevOps Summary
         </h2>
-        <span className="text-xs text-slate-400">
-          computed locally · {formatRelative(summary.generated_at)}
-        </span>
-        <button
-          type="button"
-          className="btn-secondary ml-auto py-1 text-xs"
-          onClick={() => load({ silent: true })}
-        >
-          <RefreshCw size={13} /> Refresh
-        </button>
+        <span className="text-xs text-slate-400">computed locally</span>
+        <LiveIndicator
+          className="ml-auto"
+          refreshing={refreshing}
+          lastRefreshedAt={lastRefreshedAt || generatedAt}
+          onRefresh={refreshNow}
+          showToggle
+        />
       </div>
 
       {/* ------------------------------------------------- health score */}

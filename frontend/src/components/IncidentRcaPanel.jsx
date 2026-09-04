@@ -5,6 +5,7 @@ import { ClipboardList, FileSearch, MessageSquare, Ban } from 'lucide-react'
 import { RcaStatusBadge } from './rca'
 import { Field, Modal, Spinner } from './ui'
 import { rcaApi } from '../lib/api'
+import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { formatDateTime } from '../lib/format'
 import { useToast } from '../hooks/useToast'
 
@@ -33,21 +34,31 @@ export default function IncidentRcaPanel({ incidentId, canWrite, teams = [] }) {
     due_in_days: '',
   })
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [record, thread] = await Promise.all([
-        rcaApi.forIncident(incidentId),
-        rcaApi.comments(incidentId),
-      ])
-      setRca(record)
-      setComments(thread || [])
-    } catch {
-      setRca(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [incidentId])
+  const load = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!silent) setLoading(true)
+      try {
+        const [record, thread] = await Promise.all([
+          rcaApi.forIncident(incidentId),
+          rcaApi.comments(incidentId),
+        ])
+        setRca(record)
+        setComments(thread || [])
+      } catch {
+        if (!silent) setRca(null)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [incidentId],
+  )
+
+  // The comment thread is a live conversation, so it polls on the fast
+  // cadence. The draft in the input is separate state and is never touched;
+  // polling pauses anyway while a dialog is open.
+  useAutoRefresh(() => load({ silent: true }), {
+    paused: busy || requestOpen || declineOpen,
+  })
 
   useEffect(() => {
     load()

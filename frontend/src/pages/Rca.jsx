@@ -22,6 +22,7 @@ import {
 import { rcaApi } from '../lib/api'
 import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
+import { SLOW_INTERVAL, useAutoRefresh } from '../hooks/useAutoRefresh'
 
 const TABS = [
   { id: 'all', label: 'All' },
@@ -125,6 +126,11 @@ export default function Rca() {
     load()
     loadAside()
   }, [load, loadAside])
+
+  useAutoRefresh(
+    () => Promise.all([load({ silent: true }), loadAside()]),
+    { interval: SLOW_INTERVAL },
+  )
 
   useEffect(() => {
     setPage(1)

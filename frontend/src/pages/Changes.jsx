@@ -27,6 +27,7 @@ import {
 import { changesApi, taxonomyApi } from '../lib/api'
 import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
+import { useAutoRefresh } from '../hooks/useAutoRefresh'
 
 const TABS = [
   { id: 'all', label: 'All changes' },
@@ -138,6 +139,13 @@ export default function Changes() {
     load()
     loadSummary()
   }, [load, loadSummary])
+
+  // Deployments move while you watch them, so the list stays current on its
+  // own. Paused while the create/edit dialog is open.
+  useAutoRefresh(
+    () => Promise.all([load({ silent: true }), loadSummary()]),
+    { paused: formOpen },
+  )
 
   useEffect(() => {
     setPage(1)

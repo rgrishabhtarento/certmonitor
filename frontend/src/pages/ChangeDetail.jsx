@@ -34,7 +34,9 @@ import {
   Spinner,
   StatusBadge,
 } from '../components/ui'
+import LiveIndicator from '../components/LiveIndicator'
 import { changesApi, taxonomyApi } from '../lib/api'
+import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { formatDateTime, formatMs, formatRelative } from '../lib/format'
 import { useToast } from '../hooks/useToast'
 
@@ -67,6 +69,19 @@ export default function ChangeDetail() {
       setError(err.message)
     }
   }, [changeId])
+
+  // A change record is a conversation - comments, activity, someone else
+  // starting the deployment - so it polls on the fast cadence.
+  //
+  // Paused while a dialog is open or an action is in flight. Replacing the
+  // record underneath an open Reject or Complete dialog would swap the
+  // permissions those buttons were rendered from, and the comment draft is
+  // separate state so it survives a refresh untouched.
+  const { refreshing, lastRefreshedAt, refreshNow } = useAutoRefresh(load, {
+    paused:
+      busy || formOpen || rejectOpen || completeOpen || failOpen ||
+      confirmStart || confirmCancel,
+  })
 
   useEffect(() => {
     load()
@@ -130,6 +145,12 @@ export default function ChangeDetail() {
         description={`${change.application}${change.environment ? ` · ${change.environment}` : ''}`}
         actions={
           <>
+            <LiveIndicator
+              refreshing={refreshing}
+              lastRefreshedAt={lastRefreshedAt}
+              onRefresh={refreshNow}
+              showToggle
+            />
             {change.can_edit ? (
               <button
                 type="button"

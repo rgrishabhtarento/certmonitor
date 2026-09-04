@@ -37,6 +37,7 @@ import {
   formatRelative,
 } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
+import { SLOW_INTERVAL, useAutoRefresh } from '../hooks/useAutoRefresh'
 import { useToast } from '../hooks/useToast'
 
 export default function Endpoints() {
@@ -130,6 +131,14 @@ export default function Endpoints() {
   useEffect(() => {
     load()
   }, [load])
+
+  // Status changes here are the whole point of the page. Paused while rows
+  // are selected, so a bulk action is never applied to a list that moved
+  // underneath the selection.
+  useAutoRefresh(() => load({ silent: true }), {
+    interval: SLOW_INTERVAL,
+    paused: selected.size > 0 || formOpen,
+  })
 
   // Any filter change invalidates the current page number.
   useEffect(() => {
