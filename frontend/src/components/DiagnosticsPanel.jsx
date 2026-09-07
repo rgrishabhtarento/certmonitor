@@ -24,6 +24,7 @@ import clsx from 'clsx'
 
 import { Modal, Spinner } from './ui'
 import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
+import { useBranding } from '../hooks/useBranding'
 
 /**
  * Diagnose: structured troubleshooting for one endpoint.
@@ -270,6 +271,7 @@ export default function DiagnosticsPanel({
   error,
   onRerun,
 }) {
+  const branding = useBranding()
   const [focus, setFocus] = useState('auto')
   const [showLayerData, setShowLayerData] = useState(false)
 
@@ -675,7 +677,7 @@ export default function DiagnosticsPanel({
                       </p>
                       {action.risk === 'high_risk' ? (
                         <p className="mt-1 pl-7 text-xs font-medium text-red-700 dark:text-red-300">
-                          {style.note} InfraSight will never run this for you.
+                          {style.note} {branding.app_name} will never run this for you.
                         </p>
                       ) : null}
                       {action.command ? (
@@ -781,13 +783,13 @@ export default function DiagnosticsPanel({
           {/* ========================================== 9. WHAT WE CANNOT SEE */}
           {report.not_observable?.length ? (
             <Section
-              title="Not observable from InfraSight"
+              title={`Not observable from ${branding.app_name}`}
               icon={HelpCircle}
               subtitle="Check these yourself"
               defaultOpen={false}
             >
               <p className="mb-2 text-xs text-slate-600 dark:text-slate-300">
-                InfraSight watches this endpoint from the outside. Nothing below
+                {branding.app_name} watches this endpoint from the outside. Nothing below
                 was measured, so nothing below is claimed — it is listed so that
                 silence is not mistaken for a clean result.
               </p>

@@ -11,6 +11,12 @@ import {
 
 /** Shared presentational building blocks used across every page. */
 
+// Re-exported so pages keep a single import site for shared UI. Both live in
+// their own modules: the menu because its positioning logic is substantial,
+// the identity marks because they are the only components that read branding.
+export { ActionMenu, MENU_ITEM, MENU_ITEM_DANGER } from './menu'
+export { AVATAR_EMOJI, BrandMark, EmojiPicker, UserAvatar } from './identity'
+
 // ------------------------------------------------------------------ status
 const STATUS_DOT = {
   up: 'bg-green-500',

@@ -422,7 +422,37 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         label="Selectable monitoring intervals",
         description="Interval options offered when configuring an endpoint.",
     ),
+    # Branding. Read by an unauthenticated endpoint so the sign-in screen can
+    # show them before there is a session, which is why neither may hold
+    # anything sensitive.
+    SettingSpec(
+        key="branding_app_name",
+        value_type="string",
+        default="InfraSight",
+        category="branding",
+        label="Application name",
+        description=(
+            "Shown in the header, on the sign-in screen and in the browser "
+            "tab. Leave empty to fall back to InfraSight."
+        ),
+    ),
+    SettingSpec(
+        key="branding_logo_text",
+        value_type="string",
+        default="",
+        category="branding",
+        label="Logo (emoji or initials)",
+        description=(
+            "An emoji such as 🛡 or up to 3 letters, drawn in the brand "
+            "colour beside the name. Empty uses the built-in mark."
+        ),
+    ),
 )
+
+# Branding is public, so its length caps are enforced here rather than left to
+# the UI: a 400-character "name" would break the header for everyone.
+BRANDING_MAX_APP_NAME = 40
+BRANDING_MAX_LOGO_TEXT = 8
 
 SPEC_BY_KEY: dict[str, SettingSpec] = {spec.key: spec for spec in SETTING_SPECS}
 
@@ -472,6 +502,19 @@ def validate_value(spec: SettingSpec, value: Any) -> Any:
             raise ValueError(f"{spec.key} must be at least {spec.min_value:g}")
         if spec.max_value is not None and coerced > spec.max_value:
             raise ValueError(f"{spec.key} must be at most {spec.max_value:g}")
+
+    if spec.key in ("branding_app_name", "branding_logo_text"):
+        # Collapse whitespace rather than reject it: an operator pasting a
+        # name with a stray newline should not see a validation error.
+        cleaned = " ".join(str(coerced).split())
+        limit = (
+            BRANDING_MAX_APP_NAME
+            if spec.key == "branding_app_name"
+            else BRANDING_MAX_LOGO_TEXT
+        )
+        if len(cleaned) > limit:
+            raise ValueError(f"{spec.key} must be at most {limit} characters")
+        return cleaned
 
     if spec.key == "allowed_intervals":
         if not isinstance(coerced, list) or not coerced:

@@ -5,6 +5,7 @@ import {
   Database,
   KeyRound,
   FileSearch,
+  Palette,
   Plus,
   RotateCcw,
   Save,
@@ -31,9 +32,11 @@ import {
 import { settingsApi } from '../lib/api'
 import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
+import { useBranding } from '../hooks/useBranding'
 import { useToast } from '../hooks/useToast'
 
 const CATEGORY_META = {
+  branding: { label: 'Branding', icon: Palette },
   monitoring: { label: 'Monitoring', icon: SlidersHorizontal },
   ssl: { label: 'SSL certificates', icon: ShieldCheck },
   alerting: { label: 'Alerting', icon: Bell },
@@ -81,6 +84,7 @@ const CHANNEL_FIELDS = {
 
 export default function SettingsPage() {
   const { can } = useAuth()
+  const branding = useBranding()
   const toast = useToast()
   const canWrite = can('settings:write')
   const canManageChannels = can('notification:write')
@@ -140,9 +144,15 @@ export default function SettingsPage() {
     if (!dirtyKeys.length) return
     setSaving(true)
     try {
+      const savedKeys = Object.keys(draft)
       const data = await settingsApi.update(draft)
       setPayload(data)
       setDraft({})
+      // The header and tab title read branding from its own provider, so a
+      // change there has to be pulled again rather than waiting for a reload.
+      if (savedKeys.some((key) => key.startsWith('branding_'))) {
+        branding.refresh()
+      }
       toast.success('Configuration saved. The worker picks it up within seconds.')
     } catch (err) {
       toast.error(err.message)

@@ -19,6 +19,7 @@ import {
 } from '../components/ui'
 import { systemApi } from '../lib/api'
 import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
+import { useBranding } from '../hooks/useBranding'
 import { LIVE_INTERVAL, useAutoRefresh } from '../hooks/useAutoRefresh'
 
 /**
@@ -142,6 +143,7 @@ function ProcessCard({ icon: Icon, title, subtitle, stats, extra }) {
 }
 
 export default function SystemResources() {
+  const branding = useBranding()
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
 
@@ -187,7 +189,7 @@ export default function SystemResources() {
     <>
       <PageHeader
         title="System resources"
-        description="How InfraSight itself is doing, measured on this server."
+        description={`How ${branding.app_name} itself is doing, measured on this server.`}
         actions={
           <LiveIndicator
             refreshing={refreshing}

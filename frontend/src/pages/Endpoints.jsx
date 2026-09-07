@@ -14,11 +14,14 @@ import {
 
 import EndpointForm from '../components/EndpointForm'
 import {
+  ActionMenu,
   Clamp,
   ConfirmDialog,
   EmptyState,
   ErrorState,
   LoadingBlock,
+  MENU_ITEM,
+  MENU_ITEM_DANGER,
   PageHeader,
   Pagination,
   SearchInput,
@@ -73,7 +76,6 @@ export default function Endpoints() {
   const [deleting, setDeleting] = useState(false)
   const [checkingId, setCheckingId] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
-  const [menuFor, setMenuFor] = useState(null)
 
   useEffect(() => {
     endpointsApi.filters().then(setFilters).catch(() => {})
@@ -629,48 +631,34 @@ export default function Endpoints() {
                         </p>
                       </td>
 
-                      <td className="relative text-right">
-                        <button
-                          type="button"
-                          className="btn-ghost p-1.5"
-                          onClick={() =>
-                            setMenuFor(menuFor === endpoint.id ? null : endpoint.id)
+                      <td className="text-right">
+                        <ActionMenu
+                          label={`Actions for ${endpoint.name}`}
+                          icon={
+                            checkingId === endpoint.id ? (
+                              <Spinner size={15} />
+                            ) : (
+                              <MoreHorizontal size={16} />
+                            )
                           }
-                          aria-label={`Actions for ${endpoint.name}`}
-                          aria-haspopup="menu"
                         >
-                          {checkingId === endpoint.id ? (
-                            <Spinner size={15} />
-                          ) : (
-                            <MoreHorizontal size={16} />
-                          )}
-                        </button>
-
-                        {menuFor === endpoint.id ? (
-                          <>
-                            <div
-                              className="fixed inset-0 z-10"
-                              onMouseDown={() => setMenuFor(null)}
-                              aria-hidden="true"
-                            />
-                            <div
-                              className="absolute right-2 z-20 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-lg dark:border-slate-700 dark:bg-slate-800"
-                              role="menu"
-                            >
+                          {({ close }) => (
+                            <>
                               <Link
                                 to={`/endpoints/${endpoint.id}`}
-                                className="block px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-700"
+                                className={MENU_ITEM}
                                 role="menuitem"
+                                onClick={close}
                               >
                                 View details
                               </Link>
                               {canCheck ? (
                                 <button
                                   type="button"
-                                  className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700"
+                                  className={MENU_ITEM}
                                   role="menuitem"
                                   onClick={() => {
-                                    setMenuFor(null)
+                                    close()
                                     runCheck(endpoint)
                                   }}
                                 >
@@ -681,10 +669,10 @@ export default function Endpoints() {
                                 <>
                                   <button
                                     type="button"
-                                    className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700"
+                                    className={MENU_ITEM}
                                     role="menuitem"
                                     onClick={() => {
-                                      setMenuFor(null)
+                                      close()
                                       setEditing(endpoint)
                                       setFormOpen(true)
                                     }}
@@ -693,10 +681,10 @@ export default function Endpoints() {
                                   </button>
                                   <button
                                     type="button"
-                                    className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700"
+                                    className={MENU_ITEM}
                                     role="menuitem"
                                     onClick={() => {
-                                      setMenuFor(null)
+                                      close()
                                       setMonitoring(endpoint, {
                                         is_paused: !endpoint.is_paused,
                                         monitoring_enabled: true,
@@ -710,19 +698,19 @@ export default function Endpoints() {
                               {canDelete ? (
                                 <button
                                   type="button"
-                                  className="block w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30"
+                                  className={MENU_ITEM_DANGER}
                                   role="menuitem"
                                   onClick={() => {
-                                    setMenuFor(null)
+                                    close()
                                     setConfirmDelete(endpoint)
                                   }}
                                 >
                                   Delete
                                 </button>
                               ) : null}
-                            </div>
-                          </>
-                        ) : null}
+                            </>
+                          )}
+                        </ActionMenu>
                       </td>
                     </tr>
                   ))}

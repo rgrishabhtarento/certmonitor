@@ -16,9 +16,10 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 
-import { Spinner } from '../components/ui'
+import { BrandMark, Spinner } from '../components/ui'
 import { healthApi } from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
+import { useBranding } from '../hooks/useBranding'
 
 const THEME_KEY = 'infrasight.theme'
 
@@ -140,6 +141,7 @@ function SystemStatus() {
 
 export default function Login() {
   const { login } = useAuth()
+  const branding = useBranding()
   const navigate = useNavigate()
   const location = useLocation()
   const [theme, toggleTheme] = useTheme()
@@ -207,10 +209,13 @@ export default function Login() {
         />
 
         <div className="relative flex items-center gap-2.5">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-600 shadow-lg shadow-brand-900/40">
-            <Activity size={21} />
-          </span>
-          <span className="text-lg font-semibold tracking-tight">InfraSight</span>
+          <BrandMark
+            text={branding.logo_text}
+            fallback={<Activity size={21} />}
+            size={40}
+            className="rounded-xl shadow-lg shadow-brand-900/40"
+          />
+          <span className="text-lg font-semibold tracking-tight">{branding.app_name}</span>
         </div>
 
         <div className="relative my-auto max-w-md py-10">
@@ -251,11 +256,14 @@ export default function Login() {
           {/* The mark repeats here because the brand panel is hidden below
               lg, where this column is the whole page. */}
           <span className="flex items-center gap-2 lg:hidden">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white">
-              <Activity size={19} />
-            </span>
+            <BrandMark
+              text={branding.logo_text}
+              fallback={<Activity size={19} />}
+              size={36}
+              className="rounded-xl"
+            />
             <span className="text-base font-semibold text-slate-900 dark:text-slate-50">
-              InfraSight
+              {branding.app_name}
             </span>
           </span>
           <button
@@ -273,7 +281,7 @@ export default function Login() {
             Sign in
           </h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Use your InfraSight account to continue.
+            Use your {branding.app_name} account to continue.
           </p>
 
           <form onSubmit={submit} className="mt-7 space-y-4" noValidate>

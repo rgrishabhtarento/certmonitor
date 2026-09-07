@@ -13,6 +13,7 @@ import {
   SearchInput,
   Spinner,
   Toggle,
+  UserAvatar,
 } from '../components/ui'
 import { usersApi } from '../lib/api'
 import { formatDateTime, formatRelative } from '../lib/format'
@@ -324,9 +325,7 @@ export default function UsersPage() {
                     <tr key={row.id}>
                       <td>
                         <div className="flex items-center gap-2">
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-slate-200 text-[11px] font-semibold uppercase text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-                            {row.username.slice(0, 2)}
-                          </span>
+                          <UserAvatar user={row} className="shrink-0" />
                           <div className="min-w-0">
                             <p className="font-medium">
                               {row.username}

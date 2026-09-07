@@ -25,6 +25,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from app.api.branding import router as branding_router
 from app.api.health import APP_VERSION, router as health_router
 from app.api.v1 import api_router
 from app.core.config import settings
@@ -220,6 +221,9 @@ def create_app() -> FastAPI:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
     app.include_router(health_router)
+    # Root-mounted like the probes: the sign-in screen fetches it before it
+    # has a token, so it must not sit behind the authenticated API prefix.
+    app.include_router(branding_router)
     app.include_router(api_router, prefix=settings.API_PREFIX)
 
     _register_exception_handlers(app)

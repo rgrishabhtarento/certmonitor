@@ -16,6 +16,7 @@ import {
   ServerCog,
   Settings,
   ShieldCheck,
+  Smile,
   Sun,
   Tags,
   Upload,
@@ -26,7 +27,10 @@ import {
 import clsx from 'clsx'
 
 import { alertsApi, healthApi } from '../lib/api'
+import { BrandMark, EmojiPicker, Modal, UserAvatar } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
+import { useBranding } from '../hooks/useBranding'
+import { useToast } from '../hooks/useToast'
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -111,7 +115,9 @@ function useTheme() {
 }
 
 export default function AppLayout() {
-  const { user, logout, can } = useAuth()
+  const { user, logout, can, updateProfile } = useAuth()
+  const branding = useBranding()
+  const toast = useToast()
   const location = useLocation()
   const [theme, toggleTheme] = useTheme()
   const [railCollapsed, setRailCollapsed] = useCollapsedRail()
@@ -119,6 +125,22 @@ export default function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [alertCount, setAlertCount] = useState(0)
   const [health, setHealth] = useState(null)
+  const [avatarOpen, setAvatarOpen] = useState(false)
+  const [emojiDraft, setEmojiDraft] = useState('')
+  const [savingAvatar, setSavingAvatar] = useState(false)
+
+  const saveAvatar = async () => {
+    setSavingAvatar(true)
+    try {
+      await updateProfile({ avatar_emoji: emojiDraft })
+      setAvatarOpen(false)
+      toast.success(emojiDraft ? 'Avatar updated.' : 'Avatar reset to your initials.')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSavingAvatar(false)
+    }
+  }
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => setMobileOpen(false), [location.pathname])
@@ -293,11 +315,9 @@ export default function AppLayout() {
           </button>
 
           <NavLink to="/" className="flex items-center gap-2">
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white">
-              <Activity size={17} />
-            </span>
+            <BrandMark text={branding.logo_text} fallback={<Activity size={17} />} />
             <span className="text-base font-semibold text-slate-900 dark:text-slate-50">
-              InfraSight
+              {branding.app_name}
             </span>
           </NavLink>
 
@@ -319,9 +339,7 @@ export default function AppLayout() {
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
               >
-                <span className="grid h-7 w-7 place-items-center rounded-full bg-slate-200 text-xs font-semibold uppercase text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-                  {(user?.username || '?').slice(0, 2)}
-                </span>
+                <UserAvatar user={user} />
                 <span className="hidden text-left sm:block">
                   <span className="block text-xs font-medium leading-tight text-slate-800 dark:text-slate-100">
                     {user?.username}
@@ -352,6 +370,18 @@ export default function AppLayout() {
                         {user?.email || 'No e-mail set'}
                       </p>
                     </div>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        setEmojiDraft(user?.avatar_emoji || '')
+                        setAvatarOpen(true)
+                      }}
+                    >
+                      <Smile size={15} /> Choose your emoji
+                    </button>
                     <NavLink
                       to="/change-password"
                       className="block px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700"
@@ -408,6 +438,42 @@ export default function AppLayout() {
           <Outlet />
         </main>
       </div>
+
+      <Modal
+        open={avatarOpen}
+        onClose={() => setAvatarOpen(false)}
+        title="Your avatar"
+        size="sm"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => setAvatarOpen(false)}
+              disabled={savingAvatar}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={saveAvatar}
+              disabled={savingAvatar}
+            >
+              {savingAvatar ? 'Saving…' : 'Save'}
+            </button>
+          </>
+        }
+      >
+        <div className="mb-3 flex items-center gap-3">
+          <UserAvatar user={{ ...user, avatar_emoji: emojiDraft }} size={44} />
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Shown beside your name here and wherever your account appears. Pick
+            one, or fall back to your initials.
+          </p>
+        </div>
+        <EmojiPicker value={emojiDraft} onChange={setEmojiDraft} disabled={savingAvatar} />
+      </Modal>
     </div>
   )
 }

@@ -22,6 +22,7 @@ from app.schemas.auth import (
     UserSummary,
 )
 from app.schemas.common import Message
+from app.schemas.user import ProfileUpdate
 from app.services import audit_service, settings_service, user_service
 from app.services.audit_service import client_ip
 from app.services.user_service import (
@@ -41,6 +42,7 @@ def _user_summary(user) -> UserSummary:
         username=user.username,
         email=user.email,
         full_name=user.full_name,
+        avatar_emoji=user.avatar_emoji,
         role=user.role_name,
         permissions=sorted(user.permissions),
         is_active=user.is_active,
@@ -259,6 +261,43 @@ async def logout(
     "/me", response_model=UserSummary, summary="Details of the signed-in user"
 )
 async def me(user: CurrentUser) -> UserSummary:
+    return _user_summary(user)
+
+
+@router.patch(
+    "/me", response_model=UserSummary, summary="Update your own profile"
+)
+async def update_me(
+    payload: ProfileUpdate,
+    user: CurrentUser,
+    request: Request,
+    session: DbSession,
+) -> UserSummary:
+    """Change the caller's display name or avatar emoji.
+
+    Only fields present in the request body are touched, so clearing the
+    avatar takes an explicit empty string rather than an omitted key -
+    otherwise a request that only sets ``full_name`` would wipe the emoji.
+    """
+    fields = payload.model_dump(exclude_unset=True)
+    for field, value in fields.items():
+        setattr(user, field, value)
+
+    if fields:
+        await audit_service.record(
+            session,
+            action=AuditAction.USER_UPDATED.value,
+            user=user,
+            request=request,
+            resource_type="user",
+            resource_id=user.id,
+            resource_name=user.username,
+            details={"self_service": True, "fields": sorted(fields)},
+        )
+    # No refresh: the session is created with expire_on_commit=False, so the
+    # instance stays loaded - and a refresh here would re-query the joined
+    # role relationship for nothing.
+    await session.commit()
     return _user_summary(user)
 
 

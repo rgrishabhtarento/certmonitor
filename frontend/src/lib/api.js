@@ -239,6 +239,9 @@ export const authApi = {
       .post('/auth/change-password', { current_password, new_password })
       .then((r) => r.data),
   passwordPolicy: () => api.get('/auth/password-policy').then((r) => r.data),
+  // Display name and avatar emoji only - everything else about an account is
+  // administered through usersApi.
+  updateProfile: (payload) => api.patch('/auth/me', payload).then((r) => r.data),
 }
 
 export const endpointsApi = {
@@ -475,6 +478,15 @@ export async function downloadFile(url, filename) {
 
 export const healthApi = {
   health: () => axios.get('/health').then((r) => r.data),
+}
+
+/**
+ * Deployment name and logo. Bare axios rather than `api`, for the same reason
+ * as healthApi: the route is root-mounted and unauthenticated, because the
+ * sign-in screen needs it before there is a token to send.
+ */
+export const brandingApi = {
+  get: () => axios.get('/branding').then((r) => r.data),
 }
 
 /** InfraSight's own resource usage - measured locally, no Docker socket. */

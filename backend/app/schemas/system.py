@@ -127,3 +127,14 @@ class ResourceSnapshot(BaseModel):
     # DatabaseUsage.at_steady_state.
     days_until_disk_full: int | None = None
     not_measured: list[NotMeasured] = Field(default_factory=list)
+
+
+class BrandingRead(BaseModel):
+    """Per-deployment branding, served unauthenticated.
+
+    Deliberately just these two fields: this response is public, so anything
+    added here becomes public too.
+    """
+
+    app_name: str
+    logo_text: str = ""
