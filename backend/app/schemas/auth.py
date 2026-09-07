@@ -29,7 +29,6 @@ class UserSummary(ORMModel):
     username: str
     email: str | None = None
     full_name: str | None = None
-    avatar_emoji: str | None = None
     role: str
     permissions: list[str] = Field(default_factory=list)
     is_active: bool

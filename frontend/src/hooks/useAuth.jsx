@@ -88,16 +88,6 @@ export function AuthProvider({ children }) {
     return data
   }, [])
 
-  // Self-service profile fields. The response is the whole user summary, so
-  // it replaces the cached copy - the avatar then updates in the header and
-  // anywhere else reading from the context, without a reload.
-  const updateProfile = useCallback(async (payload) => {
-    const me = await authApi.updateProfile(payload)
-    setUser(me)
-    tokenStore.save({ user: me })
-    return me
-  }, [])
-
   const value = useMemo(() => {
     const permissions = new Set(user?.permissions || [])
     return {
@@ -111,9 +101,8 @@ export function AuthProvider({ children }) {
       login,
       logout,
       changePassword,
-      updateProfile,
     }
-  }, [user, loading, mustChangePassword, login, logout, changePassword, updateProfile])
+  }, [user, loading, mustChangePassword, login, logout, changePassword])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

@@ -6,11 +6,20 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import (
+    ActiveUser,
     DbSession,
     ReadAudit,
     ReadSettings,
@@ -30,6 +39,7 @@ from app.models.alert import NotificationChannel
 from app.models.system import AuditLog, SystemSetting
 from app.schemas.common import Message, Page
 from app.schemas.dashboard import SettingRead, SettingsResponse, SettingsUpdate
+from app.schemas.system import BrandingRead, FeatureFlags
 from app.schemas.monitoring import (
     AuditLogRead,
     NotificationChannelRead,
@@ -38,6 +48,7 @@ from app.schemas.monitoring import (
 )
 from app.services import (
     audit_service,
+    branding_service,
     monitoring_service,
     notification_service,
     retention_service,
@@ -150,6 +161,110 @@ async def update_settings(
     )
     await session.commit()
     return await get_settings(session, user)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------- features
+@router.get(
+    "/features",
+    response_model=FeatureFlags,
+    summary="Which optional modules are enabled",
+)
+async def features(config: RuntimeConfig, _user: ActiveUser) -> FeatureFlags:
+    """Read by any signed-in user, not just administrators.
+
+    The navigation has to know which modules to show, and most roles hold no
+    settings:read - so this cannot live behind the settings endpoint.
+    """
+    return FeatureFlags(
+        change_management=bool(
+            config.get(settings_service.FEATURE_KEYS["change_management"], True)
+        ),
+        rca=bool(config.get(settings_service.FEATURE_KEYS["rca"], True)),
+    )
+
+
+# ------------------------------------------------------------ branding logo
+@router.post(
+    "/settings/branding/logo",
+    response_model=BrandingRead,
+    summary="Upload the company logo",
+)
+async def upload_branding_logo(
+    file: Annotated[UploadFile, File(description="PNG, JPEG, GIF or WebP")],
+    user: WriteSettings,
+    request: Request,
+    session: DbSession,
+) -> BrandingRead:
+    """Replace the logo shown in the header and on the sign-in screen.
+
+    The format is decided by sniffing the file's leading bytes, not by its
+    name or declared content type - see ``branding_service`` for why SVG is
+    refused rather than accepted and sanitised.
+    """
+    data = await file.read()
+    await file.close()
+
+    try:
+        asset = await branding_service.save_logo(
+            session, data=data, filename=file.filename, user_id=user.id
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    await audit_service.record(
+        session,
+        action=AuditAction.SETTINGS_CHANGED.value,
+        user=user,
+        request=request,
+        resource_type="branding",
+        resource_name="logo",
+        details={
+            "content_type": asset.content_type,
+            "bytes": asset.byte_size,
+            "filename": asset.original_filename,
+        },
+    )
+    await session.commit()
+
+    config = await settings_service.load_settings(session)
+    name = str(config.get("branding_app_name") or "").strip()
+    return BrandingRead(
+        app_name=name or "InfraSight",
+        logo_url=branding_service.logo_url(asset),
+    )
+
+
+@router.delete(
+    "/settings/branding/logo",
+    response_model=Message,
+    summary="Remove the company logo",
+)
+async def delete_branding_logo(
+    user: WriteSettings,
+    request: Request,
+    session: DbSession,
+) -> Message:
+    """Drop the logo, returning the UI to its built-in mark."""
+    removed = await branding_service.delete_logo(session)
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No logo has been uploaded.",
+        )
+
+    await audit_service.record(
+        session,
+        action=AuditAction.SETTINGS_CHANGED.value,
+        user=user,
+        request=request,
+        resource_type="branding",
+        resource_name="logo",
+        details={"removed": True},
+    )
+    await session.commit()
+    return Message(detail="Logo removed.")
 
 
 @router.get(

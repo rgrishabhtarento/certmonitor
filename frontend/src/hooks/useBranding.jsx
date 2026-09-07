@@ -25,7 +25,7 @@ const BrandingContext = createContext(null)
 export function BrandingProvider({ children }) {
   const [branding, setBranding] = useState({
     app_name: DEFAULT_APP_NAME,
-    logo_text: '',
+    logo_url: null,
   })
 
   const load = useCallback(
@@ -35,7 +35,7 @@ export function BrandingProvider({ children }) {
         .then((data) => {
           setBranding({
             app_name: (data?.app_name || '').trim() || DEFAULT_APP_NAME,
-            logo_text: (data?.logo_text || '').trim(),
+            logo_url: data?.logo_url || null,
           })
         })
         .catch(() => {
@@ -67,7 +67,7 @@ export function useBranding() {
   return (
     useContext(BrandingContext) ?? {
       app_name: DEFAULT_APP_NAME,
-      logo_text: '',
+      logo_url: null,
       refresh: () => Promise.resolve(),
     }
   )

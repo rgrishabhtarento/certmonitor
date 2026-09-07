@@ -239,9 +239,6 @@ export const authApi = {
       .post('/auth/change-password', { current_password, new_password })
       .then((r) => r.data),
   passwordPolicy: () => api.get('/auth/password-policy').then((r) => r.data),
-  // Display name and avatar emoji only - everything else about an account is
-  // administered through usersApi.
-  updateProfile: (payload) => api.patch('/auth/me', payload).then((r) => r.data),
 }
 
 export const endpointsApi = {
@@ -437,6 +434,19 @@ export const settingsApi = {
   testChannel: (id) => api.post(`/notification-channels/${id}/test`).then((r) => r.data),
   removeChannel: (id) => api.delete(`/notification-channels/${id}`).then((r) => r.data),
   workers: () => api.get('/workers').then((r) => r.data),
+  // Feature flags. Any signed-in role may read these - the navigation needs
+  // them, and most roles hold no settings:read.
+  features: () => api.get('/features').then((r) => r.data),
+  uploadLogo: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api
+      .post('/settings/branding/logo', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data)
+  },
+  removeLogo: () => api.delete('/settings/branding/logo').then((r) => r.data),
 }
 
 export const importExportApi = {

@@ -15,7 +15,7 @@ import {
 // their own modules: the menu because its positioning logic is substantial,
 // the identity marks because they are the only components that read branding.
 export { ActionMenu, MENU_ITEM, MENU_ITEM_DANGER } from './menu'
-export { AVATAR_EMOJI, BrandMark, EmojiPicker, UserAvatar } from './identity'
+export { BrandMark, UserAvatar } from './identity'
 
 // ------------------------------------------------------------------ status
 const STATUS_DOT = {

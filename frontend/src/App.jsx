@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AppLayout from './layouts/AppLayout'
 import { Spinner } from './components/ui'
 import { useAuth } from './hooks/useAuth'
+import { useFeatures } from './hooks/useFeatures'
 import ChangePassword from './pages/ChangePassword'
 import Dashboard from './pages/Dashboard'
 import Endpoints from './pages/Endpoints'
@@ -69,6 +70,18 @@ function RequireAuth({ children }) {
 function RequirePermission({ permission, children }) {
   const { can } = useAuth()
   if (!can(permission)) return <Navigate to="/" replace />
+  return children
+}
+
+/**
+ * Hides a route belonging to a module an administrator has switched off.
+ *
+ * Cosmetic on its own - the API refuses these routes too - but it keeps a
+ * bookmarked URL from landing on a page that can only render errors.
+ */
+function RequireFeature({ feature, children }) {
+  const features = useFeatures()
+  if (!features[feature]) return <Navigate to="/" replace />
   return children
 }
 
@@ -144,41 +157,49 @@ export default function App() {
         <Route
           path="changes"
           element={
-            <RequirePermission permission="change:read">
-              <Suspense fallback={<RouteFallback />}>
-                <Changes />
-              </Suspense>
-            </RequirePermission>
+            <RequireFeature feature="change_management">
+              <RequirePermission permission="change:read">
+                <Suspense fallback={<RouteFallback />}>
+                  <Changes />
+                </Suspense>
+              </RequirePermission>
+            </RequireFeature>
           }
         />
         <Route
           path="changes/:changeId"
           element={
-            <RequirePermission permission="change:read">
-              <Suspense fallback={<RouteFallback />}>
-                <ChangeDetail />
-              </Suspense>
-            </RequirePermission>
+            <RequireFeature feature="change_management">
+              <RequirePermission permission="change:read">
+                <Suspense fallback={<RouteFallback />}>
+                  <ChangeDetail />
+                </Suspense>
+              </RequirePermission>
+            </RequireFeature>
           }
         />
         <Route
           path="rca"
           element={
-            <RequirePermission permission="incident:read">
-              <Suspense fallback={<RouteFallback />}>
-                <Rca />
-              </Suspense>
-            </RequirePermission>
+            <RequireFeature feature="rca">
+              <RequirePermission permission="incident:read">
+                <Suspense fallback={<RouteFallback />}>
+                  <Rca />
+                </Suspense>
+              </RequirePermission>
+            </RequireFeature>
           }
         />
         <Route
           path="rca/:rcaId"
           element={
-            <RequirePermission permission="incident:read">
-              <Suspense fallback={<RouteFallback />}>
-                <RcaDetail />
-              </Suspense>
-            </RequirePermission>
+            <RequireFeature feature="rca">
+              <RequirePermission permission="incident:read">
+                <Suspense fallback={<RouteFallback />}>
+                  <RcaDetail />
+                </Suspense>
+              </RequirePermission>
+            </RequireFeature>
           }
         />
         <Route

@@ -137,4 +137,17 @@ class BrandingRead(BaseModel):
     """
 
     app_name: str
-    logo_text: str = ""
+    # Null when no logo has been uploaded; the UI then draws its built-in
+    # mark. Carries a content hash, so the URL changes when the logo does.
+    logo_url: str | None = None
+
+
+class FeatureFlags(BaseModel):
+    """Which optional modules are switched on.
+
+    Read by any signed-in user, because the navigation has to know what to
+    show and most roles cannot read the settings table.
+    """
+
+    change_management: bool
+    rca: bool

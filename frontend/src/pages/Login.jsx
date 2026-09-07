@@ -210,7 +210,8 @@ export default function Login() {
 
         <div className="relative flex items-center gap-2.5">
           <BrandMark
-            text={branding.logo_text}
+            logoUrl={branding.logo_url}
+            alt={branding.app_name}
             fallback={<Activity size={21} />}
             size={40}
             className="rounded-xl shadow-lg shadow-brand-900/40"
@@ -257,7 +258,8 @@ export default function Login() {
               lg, where this column is the whole page. */}
           <span className="flex items-center gap-2 lg:hidden">
             <BrandMark
-              text={branding.logo_text}
+              logoUrl={branding.logo_url}
+              alt={branding.app_name}
               fallback={<Activity size={19} />}
               size={36}
               className="rounded-xl"

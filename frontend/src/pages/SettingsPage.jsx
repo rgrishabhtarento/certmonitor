@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bell,
   ClipboardList,
   Database,
   KeyRound,
   FileSearch,
+  Image as ImageIcon,
   Palette,
   Plus,
   RotateCcw,
@@ -13,7 +14,9 @@ import {
   Server,
   ShieldCheck,
   SlidersHorizontal,
+  ToggleLeft,
   Trash2,
+  Upload,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -33,6 +36,7 @@ import { settingsApi } from '../lib/api'
 import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
 import { useBranding } from '../hooks/useBranding'
+import { useFeatures } from '../hooks/useFeatures'
 import { useToast } from '../hooks/useToast'
 
 const CATEGORY_META = {
@@ -44,6 +48,7 @@ const CATEGORY_META = {
   changes: { label: 'Change management', icon: ClipboardList },
   rca: { label: 'RCA', icon: FileSearch },
   retention: { label: 'Data retention', icon: Database },
+  features: { label: 'Optional modules', icon: ToggleLeft },
   general: { label: 'General', icon: Server },
 }
 
@@ -82,9 +87,108 @@ const CHANNEL_FIELDS = {
   ],
 }
 
+/**
+ * Upload, preview and remove the company logo.
+ *
+ * A module-level component rather than one defined inside SettingsPage: a
+ * nested definition is a new component type on every parent render, so React
+ * would unmount and remount it - losing the in-flight upload state.
+ *
+ * Accepted formats are decided by the server from the file's leading bytes.
+ * The `accept` attribute here is a convenience for the file picker, not the
+ * validation - and SVG is absent from both, because it can carry script and
+ * the logo is served from this origin.
+ */
+function LogoField({ logoUrl, canWrite, onChanged, toast }) {
+  const inputRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+
+  const upload = async (file) => {
+    if (!file) return
+    setBusy(true)
+    try {
+      await settingsApi.uploadLogo(file)
+      await onChanged()
+      toast.success('Logo updated.')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setBusy(false)
+      // Clear the input so re-picking the same file fires onChange again.
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  const remove = async () => {
+    setBusy(true)
+    try {
+      await settingsApi.removeLogo()
+      await onChanged()
+      toast.success('Logo removed.')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+      <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+        Company logo
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <span className="grid h-12 w-12 place-items-center rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt="Current logo"
+              className="h-10 w-10 rounded object-contain"
+            />
+          ) : (
+            <ImageIcon size={18} className="text-slate-400" />
+          )}
+        </span>
+
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          className="hidden"
+          onChange={(event) => upload(event.target.files?.[0])}
+        />
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={!canWrite || busy}
+          onClick={() => inputRef.current?.click()}
+        >
+          {busy ? <Spinner size={15} /> : <Upload size={15} />}
+          {logoUrl ? 'Replace logo' : 'Upload logo'}
+        </button>
+        {logoUrl ? (
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            disabled={!canWrite || busy}
+            onClick={remove}
+          >
+            Remove
+          </button>
+        ) : null}
+      </div>
+      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+        PNG, JPEG, GIF or WebP, up to 512 KB. A square image works best — the
+        header draws it in a 32 px tile. Without one, the built-in mark is used.
+      </p>
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const { can } = useAuth()
   const branding = useBranding()
+  const features = useFeatures()
   const toast = useToast()
   const canWrite = can('settings:write')
   const canManageChannels = can('notification:write')
@@ -148,10 +252,14 @@ export default function SettingsPage() {
       const data = await settingsApi.update(draft)
       setPayload(data)
       setDraft({})
-      // The header and tab title read branding from its own provider, so a
-      // change there has to be pulled again rather than waiting for a reload.
+      // Branding and features each live in their own provider, so a change
+      // has to be pulled again rather than waiting for a reload - otherwise
+      // the header keeps the old name and the nav the old modules.
       if (savedKeys.some((key) => key.startsWith('branding_'))) {
         branding.refresh()
+      }
+      if (savedKeys.some((key) => key.startsWith('feature_'))) {
+        features.refresh()
       }
       toast.success('Configuration saved. The worker picks it up within seconds.')
     } catch (err) {
@@ -429,6 +537,21 @@ export default function SettingsPage() {
                 <p className="mt-3 rounded-lg bg-brand-50 px-2.5 py-2 text-xs text-brand-800 dark:bg-brand-900/25 dark:text-brand-200">
                   Changing an SSL threshold re-grades every stored certificate
                   immediately, rather than waiting for each endpoint&apos;s next check.
+                </p>
+              ) : null}
+              {category === 'branding' ? (
+                <LogoField
+                  logoUrl={branding.logo_url}
+                  canWrite={canWrite}
+                  onChanged={branding.refresh}
+                  toast={toast}
+                />
+              ) : null}
+              {category === 'features' ? (
+                <p className="mt-3 rounded-lg bg-brand-50 px-2.5 py-2 text-xs text-brand-800 dark:bg-brand-900/25 dark:text-brand-200">
+                  Switching a module off hides it from the navigation for
+                  everyone and makes its API refuse requests. Existing records
+                  are kept, and reappear if it is switched back on.
                 </p>
               ) : null}
             </Card>

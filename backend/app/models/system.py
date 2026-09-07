@@ -9,6 +9,8 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Index,
+    Integer,
+    LargeBinary,
     String,
     Text,
     Uuid,
@@ -81,6 +83,34 @@ class SystemSetting(Base):
     max_value: Mapped[float | None] = mapped_column()
     is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_editable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        TimestampTZ, nullable=False, default=utcnow, onupdate=utcnow
+    )
+    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
+class BrandingAsset(Base):
+    """A binary branding asset, keyed by role - currently only the logo.
+
+    Held in the database rather than on a volume so it survives a container
+    rebuild and is identical for every replica. Small by construction: the
+    upload endpoint caps the size, because this row is read on every
+    unauthenticated hit to the logo route.
+    """
+
+    __tablename__ = "branding_assets"
+
+    key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Cheap cache validator: the logo URL carries it, so a new upload busts
+    # any cached copy without the browser revalidating on every page load.
+    etag: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String(255))
 
     updated_at: Mapped[datetime] = mapped_column(
         TimestampTZ, nullable=False, default=utcnow, onupdate=utcnow

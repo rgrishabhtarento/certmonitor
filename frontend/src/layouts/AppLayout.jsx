@@ -16,7 +16,6 @@ import {
   ServerCog,
   Settings,
   ShieldCheck,
-  Smile,
   Sun,
   Tags,
   Upload,
@@ -27,10 +26,10 @@ import {
 import clsx from 'clsx'
 
 import { alertsApi, healthApi } from '../lib/api'
-import { BrandMark, EmojiPicker, Modal, UserAvatar } from '../components/ui'
+import { BrandMark, UserAvatar } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
 import { useBranding } from '../hooks/useBranding'
-import { useToast } from '../hooks/useToast'
+import { useFeatures } from '../hooks/useFeatures'
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -38,17 +37,21 @@ const NAV = [
   { to: '/ssl', label: 'SSL Certificates', icon: ShieldCheck },
   { to: '/incidents', label: 'Incidents', icon: Zap },
   { to: '/alerts', label: 'Alerts', icon: Bell, badge: 'alerts' },
+  // `feature` names an optional module. Both gates apply: the role must hold
+  // the permission AND an administrator must have the module switched on.
   {
     to: '/changes',
     label: 'Change Management',
     icon: ClipboardList,
     permission: 'change:read',
+    feature: 'change_management',
   },
   {
     to: '/rca',
     label: 'RCA',
     icon: FileSearch,
     permission: 'incident:read',
+    feature: 'rca',
   },
   { to: '/tags', label: 'Tags', icon: Tags },
   { to: '/environments', label: 'Environments', icon: Globe },
@@ -115,9 +118,9 @@ function useTheme() {
 }
 
 export default function AppLayout() {
-  const { user, logout, can, updateProfile } = useAuth()
+  const { user, logout, can } = useAuth()
   const branding = useBranding()
-  const toast = useToast()
+  const features = useFeatures()
   const location = useLocation()
   const [theme, toggleTheme] = useTheme()
   const [railCollapsed, setRailCollapsed] = useCollapsedRail()
@@ -125,22 +128,6 @@ export default function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [alertCount, setAlertCount] = useState(0)
   const [health, setHealth] = useState(null)
-  const [avatarOpen, setAvatarOpen] = useState(false)
-  const [emojiDraft, setEmojiDraft] = useState('')
-  const [savingAvatar, setSavingAvatar] = useState(false)
-
-  const saveAvatar = async () => {
-    setSavingAvatar(true)
-    try {
-      await updateProfile({ avatar_emoji: emojiDraft })
-      setAvatarOpen(false)
-      toast.success(emojiDraft ? 'Avatar updated.' : 'Avatar reset to your initials.')
-    } catch (err) {
-      toast.error(err.message)
-    } finally {
-      setSavingAvatar(false)
-    }
-  }
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => setMobileOpen(false), [location.pathname])
@@ -167,7 +154,11 @@ export default function AppLayout() {
     }
   }, [])
 
-  const visibleNav = NAV.filter((item) => !item.permission || can(item.permission))
+  const visibleNav = NAV.filter(
+    (item) =>
+      (!item.permission || can(item.permission)) &&
+      (!item.feature || features[item.feature]),
+  )
 
   const workerState = health?.monitoring_worker
   const workerTone =
@@ -315,7 +306,11 @@ export default function AppLayout() {
           </button>
 
           <NavLink to="/" className="flex items-center gap-2">
-            <BrandMark text={branding.logo_text} fallback={<Activity size={17} />} />
+            <BrandMark
+              logoUrl={branding.logo_url}
+              fallback={<Activity size={17} />}
+              alt={branding.app_name}
+            />
             <span className="text-base font-semibold text-slate-900 dark:text-slate-50">
               {branding.app_name}
             </span>
@@ -370,18 +365,6 @@ export default function AppLayout() {
                         {user?.email || 'No e-mail set'}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700"
-                      role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false)
-                        setEmojiDraft(user?.avatar_emoji || '')
-                        setAvatarOpen(true)
-                      }}
-                    >
-                      <Smile size={15} /> Choose your emoji
-                    </button>
                     <NavLink
                       to="/change-password"
                       className="block px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700"
@@ -439,41 +422,6 @@ export default function AppLayout() {
         </main>
       </div>
 
-      <Modal
-        open={avatarOpen}
-        onClose={() => setAvatarOpen(false)}
-        title="Your avatar"
-        size="sm"
-        footer={
-          <>
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => setAvatarOpen(false)}
-              disabled={savingAvatar}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={saveAvatar}
-              disabled={savingAvatar}
-            >
-              {savingAvatar ? 'Saving…' : 'Save'}
-            </button>
-          </>
-        }
-      >
-        <div className="mb-3 flex items-center gap-3">
-          <UserAvatar user={{ ...user, avatar_emoji: emojiDraft }} size={44} />
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Shown beside your name here and wherever your account appears. Pick
-            one, or fall back to your initials.
-          </p>
-        </div>
-        <EmojiPicker value={emojiDraft} onChange={setEmojiDraft} disabled={savingAvatar} />
-      </Modal>
     </div>
   )
 }

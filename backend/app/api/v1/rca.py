@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from app.api.deps import (
     DbSession,
     Pagination,
+    RcaEnabled,
     parse_uuid_list,
     require_permissions,
     split_csv_param,
@@ -175,7 +176,10 @@ async def infrastructure_search(
 
 # ==================================================================== RCA
 @router.get(
-    "/rca/dashboard", response_model=RcaDashboard, summary="RCA overview"
+    "/rca/dashboard",
+    dependencies=[RcaEnabled],
+    response_model=RcaDashboard,
+    summary="RCA overview",
 )
 async def rca_dashboard(session: DbSession, _user: ReadIncidents) -> RcaDashboard:
     payload = await rca_service.dashboard(session)
@@ -186,7 +190,10 @@ async def rca_dashboard(session: DbSession, _user: ReadIncidents) -> RcaDashboar
 
 
 @router.get(
-    "/rca/analytics", response_model=RcaAnalytics, summary="RCA reporting"
+    "/rca/analytics",
+    dependencies=[RcaEnabled],
+    response_model=RcaAnalytics,
+    summary="RCA reporting",
 )
 async def rca_analytics(
     session: DbSession,
@@ -205,7 +212,12 @@ async def rca_analytics(
     return RcaAnalytics.model_validate(payload)
 
 
-@router.get("/rca/options", response_model=RcaOptions, summary="Filter options")
+@router.get(
+    "/rca/options",
+    dependencies=[RcaEnabled],
+    response_model=RcaOptions,
+    summary="Filter options",
+)
 async def rca_options(session: DbSession, _user: ReadIncidents) -> RcaOptions:
     teams = [
         row
@@ -228,7 +240,12 @@ async def rca_options(session: DbSession, _user: ReadIncidents) -> RcaOptions:
     return RcaOptions(teams=sorted(teams), applications=sorted(applications))
 
 
-@router.get("/rca", response_model=Page[RcaListItem], summary="List RCAs")
+@router.get(
+    "/rca",
+    dependencies=[RcaEnabled],
+    response_model=Page[RcaListItem],
+    summary="List RCAs",
+)
 async def list_rcas(
     session: DbSession,
     user: ReadIncidents,
@@ -278,7 +295,12 @@ async def list_rcas(
     )
 
 
-@router.get("/rca/{rca_id}", response_model=RcaRead, summary="RCA details")
+@router.get(
+    "/rca/{rca_id}",
+    dependencies=[RcaEnabled],
+    response_model=RcaRead,
+    summary="RCA details",
+)
 async def get_rca(
     rca_id: int, session: DbSession, user: ReadIncidents
 ) -> RcaRead:
@@ -303,6 +325,7 @@ async def get_rca(
 # ------------------------------------------------- from the incident page
 @router.get(
     "/incidents/{incident_id}/rca",
+    dependencies=[RcaEnabled],
     response_model=RcaRead | None,
     summary="The RCA for an incident, if one exists",
 )
@@ -329,6 +352,7 @@ async def rca_for_incident(
 
 @router.post(
     "/incidents/{incident_id}/rca",
+    dependencies=[RcaEnabled],
     response_model=RcaRead,
     status_code=status.HTTP_201_CREATED,
     summary="Request an RCA for an incident",
@@ -390,6 +414,7 @@ async def request_rca(
 
 @router.post(
     "/incidents/{incident_id}/rca/not-required",
+    dependencies=[RcaEnabled],
     response_model=RcaRead,
     summary="Record that this incident does not need an RCA",
 )
@@ -489,7 +514,12 @@ async def add_incident_comment(
 
 
 # ------------------------------------------------------------- workflow
-@router.put("/rca/{rca_id}", response_model=RcaRead, summary="Save RCA content")
+@router.put(
+    "/rca/{rca_id}",
+    dependencies=[RcaEnabled],
+    response_model=RcaRead,
+    summary="Save RCA content",
+)
 async def update_rca(
     rca_id: int,
     payload: RcaUpdate,
@@ -545,7 +575,12 @@ async def update_rca(
     )
 
 
-@router.post("/rca/{rca_id}/assign", response_model=RcaRead, summary="Assign an RCA")
+@router.post(
+    "/rca/{rca_id}/assign",
+    dependencies=[RcaEnabled],
+    response_model=RcaRead,
+    summary="Assign an RCA",
+)
 async def assign_rca(
     rca_id: int,
     payload: RcaAssign,
@@ -591,6 +626,7 @@ async def assign_rca(
 
 @router.post(
     "/rca/{rca_id}/draft",
+    dependencies=[RcaEnabled],
     response_model=RcaDraft,
     summary="Generate an RCA draft from local data",
 )
@@ -611,7 +647,10 @@ async def generate_rca_draft(
 
 
 @router.post(
-    "/rca/{rca_id}/complete", response_model=RcaRead, summary="Complete an RCA"
+    "/rca/{rca_id}/complete",
+    dependencies=[RcaEnabled],
+    response_model=RcaRead,
+    summary="Complete an RCA",
 )
 async def complete_rca(
     rca_id: int,

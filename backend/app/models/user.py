@@ -74,12 +74,6 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # it needs no team table, membership screen or extra role to do that.
     team: Mapped[str | None] = mapped_column(String(64), index=True)
 
-    # A single emoji the user picks as their avatar. Wide enough for a
-    # multi-codepoint grapheme - a flag is two codepoints, and an emoji with a
-    # skin-tone or ZWJ sequence is longer still, so String(8) would truncate
-    # mid-sequence and store a broken character.
-    avatar_emoji: Mapped[str | None] = mapped_column(String(32))
-
     # Only ever a bcrypt digest; the plaintext never leaves the request scope.
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
 

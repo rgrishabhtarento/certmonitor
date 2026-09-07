@@ -204,6 +204,41 @@ async def runtime_config(session: DbSession) -> dict[str, Any]:
 RuntimeConfig = Annotated[dict[str, Any], Depends(runtime_config)]
 
 
+def require_feature(setting_key: str, label: str) -> Callable[..., Any]:
+    """Dependency factory refusing a route while its module is switched off.
+
+    Enforced server-side, not just hidden in the UI: a disabled module must
+    not stay reachable by anyone who knows the URL, or "off" is decoration.
+
+    403 rather than 404 - the route exists and the caller's permissions are
+    fine. An administrator turned the module off, and saying so is what makes
+    the response actionable.
+
+    Defined below ``RuntimeConfig`` because it depends on it.
+    """
+
+    async def dependency(config: RuntimeConfig) -> None:
+        if not config.get(setting_key, True):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"{label} is disabled for this deployment.",
+            )
+
+    return dependency
+
+
+# Module gates, resolved from settings on every request so a toggle takes
+# effect within the settings cache TTL rather than needing a restart.
+ChangeManagementEnabled = Depends(
+    require_feature(
+        settings_service.FEATURE_KEYS["change_management"], "Change management"
+    )
+)
+RcaEnabled = Depends(
+    require_feature(settings_service.FEATURE_KEYS["rca"], "Root cause analysis")
+)
+
+
 def parse_uuid_list(values: list[str] | None) -> list[uuid.UUID]:
     """Turn repeated query params into UUIDs, rejecting malformed entries."""
     parsed: list[uuid.UUID] = []

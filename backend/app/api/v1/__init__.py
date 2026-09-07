@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from app.api.deps import ChangeManagementEnabled
 from app.api.v1 import (
     auth,
     changes,
@@ -27,7 +28,11 @@ api_router.include_router(incidents.router)
 # RCA and the local intelligence endpoints. Registered after incidents so the
 # literal /incidents/{id}/rca paths resolve against the RCA router.
 api_router.include_router(rca.router)
-api_router.include_router(changes.router)
+# Every route in this module belongs to the change-management feature, so the
+# gate goes on the include. The RCA module cannot be gated this way: its
+# router also carries the /intelligence routes the dashboard needs, so those
+# routes are gated individually.
+api_router.include_router(changes.router, dependencies=[ChangeManagementEnabled])
 api_router.include_router(taxonomy.router)
 api_router.include_router(users.router)
 api_router.include_router(settings_routes.router)

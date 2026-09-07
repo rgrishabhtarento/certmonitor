@@ -436,23 +436,43 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
             "tab. Leave empty to fall back to InfraSight."
         ),
     ),
+    # Optional modules. Off here would hide a module an existing deployment
+    # already uses, so both default to on; a new deployment turns off what it
+    # does not want.
     SettingSpec(
-        key="branding_logo_text",
-        value_type="string",
-        default="",
-        category="branding",
-        label="Logo (emoji or initials)",
+        key="feature_change_management_enabled",
+        value_type="bool",
+        default=True,
+        category="features",
+        label="Change management",
         description=(
-            "An emoji such as 🛡 or up to 3 letters, drawn in the brand "
-            "colour beside the name. Empty uses the built-in mark."
+            "Deployment records, approvals and monitoring pauses. Off hides "
+            "the module and its API refuses requests."
+        ),
+    ),
+    SettingSpec(
+        key="feature_rca_enabled",
+        value_type="bool",
+        default=True,
+        category="features",
+        label="Root cause analysis",
+        description=(
+            "Post-incident RCA records, assignment and reporting. Off hides "
+            "the module; incident history itself is unaffected."
         ),
     ),
 )
 
-# Branding is public, so its length caps are enforced here rather than left to
-# the UI: a 400-character "name" would break the header for everyone.
+# Branding is public, so this cap is enforced here rather than left to the UI:
+# a 400-character "name" would break the header for everyone.
 BRANDING_MAX_APP_NAME = 40
-BRANDING_MAX_LOGO_TEXT = 8
+
+# Settings that gate a module. Named so a route can reference the key without
+# repeating the string, and so the frontend contract has one source.
+FEATURE_KEYS: dict[str, str] = {
+    "change_management": "feature_change_management_enabled",
+    "rca": "feature_rca_enabled",
+}
 
 SPEC_BY_KEY: dict[str, SettingSpec] = {spec.key: spec for spec in SETTING_SPECS}
 
@@ -503,17 +523,14 @@ def validate_value(spec: SettingSpec, value: Any) -> Any:
         if spec.max_value is not None and coerced > spec.max_value:
             raise ValueError(f"{spec.key} must be at most {spec.max_value:g}")
 
-    if spec.key in ("branding_app_name", "branding_logo_text"):
+    if spec.key == "branding_app_name":
         # Collapse whitespace rather than reject it: an operator pasting a
         # name with a stray newline should not see a validation error.
         cleaned = " ".join(str(coerced).split())
-        limit = (
-            BRANDING_MAX_APP_NAME
-            if spec.key == "branding_app_name"
-            else BRANDING_MAX_LOGO_TEXT
-        )
-        if len(cleaned) > limit:
-            raise ValueError(f"{spec.key} must be at most {limit} characters")
+        if len(cleaned) > BRANDING_MAX_APP_NAME:
+            raise ValueError(
+                f"{spec.key} must be at most {BRANDING_MAX_APP_NAME} characters"
+            )
         return cleaned
 
     if spec.key == "allowed_intervals":
