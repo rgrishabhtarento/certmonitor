@@ -260,7 +260,18 @@ export default function Incidents() {
                       <td>
                         <StatusBadge status={incident.status === 'open' ? 'down' : 'up'} />
                         {incident.acknowledged_at ? (
-                          <p className="text-[11px] text-slate-400">acknowledged</p>
+                          <p
+                            className="truncate text-[11px] text-slate-400"
+                            title={`Acknowledged ${formatDateTime(incident.acknowledged_at)}${
+                              incident.acknowledged_by
+                                ? ` by ${incident.acknowledged_by}`
+                                : ''
+                            }`}
+                          >
+                            {incident.acknowledged_by
+                              ? `ack. by ${incident.acknowledged_by}`
+                              : 'acknowledged'}
+                          </p>
                         ) : null}
                       </td>
                       <td className="max-w-[14rem]">
@@ -421,6 +432,21 @@ export default function Incidents() {
                           : ''
                       }`
                     : '—'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-500">Acknowledged</dt>
+                <dd className="font-medium">
+                  {selected.acknowledged_at ? (
+                    <>
+                      {selected.acknowledged_by || 'Unknown user'}
+                      <span className="ml-1.5 text-xs font-normal text-slate-500">
+                        {formatDateTime(selected.acknowledged_at)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="font-normal text-slate-500">Not acknowledged</span>
+                  )}
                 </dd>
               </div>
             </dl>

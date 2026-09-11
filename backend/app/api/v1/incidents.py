@@ -55,6 +55,24 @@ def _incident_query():
     )
 
 
+async def _acknowledger_names(session, incidents) -> dict[uuid.UUID, str]:
+    """Who acknowledged each of these incidents, in one query.
+
+    Resolved for the whole page at once rather than per row: "acknowledged"
+    without a name is a record of nothing, but looking each one up
+    individually would add a query per incident.
+    """
+    ids = {i.acknowledged_by_id for i in incidents if i.acknowledged_by_id}
+    if not ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(User.id, User.username).where(User.id.in_(ids))
+        )
+    ).all()
+    return {row[0]: row[1] for row in rows}
+
+
 @router.get(
     "/incidents",
     response_model=Page[IncidentRead],
@@ -143,8 +161,15 @@ async def list_incidents(
         .all()
     )
 
+    acknowledgers = await _acknowledger_names(session, rows)
+
     return Page.build(
-        [_incident_to_schema(row) for row in rows],
+        [
+            _incident_to_schema(
+                row, acknowledged_by=acknowledgers.get(row.acknowledged_by_id)
+            )
+            for row in rows
+        ],
         total=total,
         page=page.page,
         page_size=page.page_size,
