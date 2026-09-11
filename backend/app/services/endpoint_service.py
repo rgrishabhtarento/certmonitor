@@ -6,14 +6,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, delete, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.enums import AuthType, CheckType, EndpointStatus, SslStatus
 from app.core.logging import get_logger
 from app.core.security import encrypt_secret, mask_secret
-from app.models.endpoint import Endpoint, Environment, Tag
+from app.models.endpoint import Endpoint, Environment, Tag, endpoint_dependencies
 from app.monitoring.validators import (
     UrlValidationError,
     clamp_interval,
@@ -51,9 +51,11 @@ class EndpointConflict(ValueError):
 
 
 def base_query() -> Select:
-    """Endpoint select with tags and environment eagerly loaded."""
+    """Endpoint select with tags, environment and dependencies eagerly loaded."""
     return select(Endpoint).options(
-        selectinload(Endpoint.tags), selectinload(Endpoint.environment)
+        selectinload(Endpoint.tags),
+        selectinload(Endpoint.environment),
+        selectinload(Endpoint.dependencies),
     )
 
 
@@ -141,6 +143,62 @@ async def resolve_environment(
     await session.flush()
     logger.info("environment_auto_created", name=name)
     return environment
+
+
+# ----------------------------------------------------------- dependencies
+async def resolve_dependencies(
+    session: AsyncSession,
+    endpoint_id: uuid.UUID,
+    raw_ids: Iterable[Any] | None,
+) -> list[uuid.UUID]:
+    """Validate and de-duplicate a list of endpoint ids to depend on.
+
+    A self-reference or an id that does not resolve to a real endpoint is
+    dropped rather than rejected outright - a stale id in the payload should
+    not fail the whole update, only fail to be recorded as a dependency.
+    """
+    if not raw_ids:
+        return []
+    seen: set[uuid.UUID] = set()
+    ordered: list[uuid.UUID] = []
+    for raw in raw_ids:
+        try:
+            candidate = raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw))
+        except (ValueError, AttributeError, TypeError):
+            continue
+        if candidate == endpoint_id or candidate in seen:
+            continue
+        seen.add(candidate)
+        ordered.append(candidate)
+    if not ordered:
+        return []
+
+    existing = (
+        await session.execute(select(Endpoint.id).where(Endpoint.id.in_(ordered)))
+    ).scalars().all()
+    existing_set = set(existing)
+    return [dep_id for dep_id in ordered if dep_id in existing_set]
+
+
+async def set_dependencies(
+    session: AsyncSession,
+    endpoint_id: uuid.UUID,
+    dependency_ids: list[uuid.UUID],
+) -> None:
+    """Replace the full set of declared dependencies for one endpoint."""
+    await session.execute(
+        delete(endpoint_dependencies).where(
+            endpoint_dependencies.c.endpoint_id == endpoint_id
+        )
+    )
+    if dependency_ids:
+        await session.execute(
+            insert(endpoint_dependencies),
+            [
+                {"endpoint_id": endpoint_id, "depends_on_endpoint_id": dep_id}
+                for dep_id in dependency_ids
+            ],
+        )
 
 
 # -------------------------------------------------------------- validation
@@ -336,6 +394,14 @@ async def create_endpoint(
 
     session.add(endpoint)
     await session.flush()
+
+    if payload.get("dependency_ids"):
+        dep_ids = await resolve_dependencies(
+            session, endpoint.id, payload["dependency_ids"]
+        )
+        if dep_ids:
+            await set_dependencies(session, endpoint.id, dep_ids)
+
     return endpoint
 
 
@@ -465,6 +531,12 @@ async def update_endpoint(
 
     if "tags" in payload and payload["tags"] is not None:
         endpoint.tags = await resolve_tags(session, payload["tags"])
+
+    if "dependency_ids" in payload and payload["dependency_ids"] is not None:
+        dep_ids = await resolve_dependencies(
+            session, endpoint.id, payload["dependency_ids"]
+        )
+        await set_dependencies(session, endpoint.id, dep_ids)
 
     # ------------------------------------------------------ credentials
     auth_type = str(

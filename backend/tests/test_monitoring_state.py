@@ -21,7 +21,7 @@ from app.core.enums import (
     SslStatus,
 )
 from app.models.alert import Alert
-from app.models.endpoint import Endpoint
+from app.models.endpoint import Endpoint, Environment
 from app.models.incident import Incident
 from app.models.monitoring import MonitoringResult, SslCertificate
 from app.monitoring.checker import CheckOutcome
@@ -189,20 +189,103 @@ class TestIncidentLifecycle:
         assert incident.recovery_status_code == 200
         assert endpoint.current_status == EndpointStatus.UP.value
 
-    async def test_a_new_outage_opens_a_second_incident(
+    async def test_a_new_outage_past_the_grouping_window_opens_a_second_incident(
         self, session, endpoint_factory, runtime_config
     ):
+        """Outages far enough apart are genuinely separate problems."""
         endpoint = await endpoint_factory(failure_threshold=1)
+        first_started = datetime.now(timezone.utc) - timedelta(hours=1)
 
-        await record(session, endpoint, failure(), runtime_config)
-        await record(session, endpoint, success(), runtime_config)
-        await record(session, endpoint, failure(), runtime_config)
+        await record(session, endpoint, failure(at=first_started), runtime_config)
+        await record(
+            session,
+            endpoint,
+            success(at=first_started + timedelta(seconds=30)),
+            runtime_config,
+        )
+        # Well past incident_grouping_minutes (default 15) since the recovery.
+        await record(
+            session,
+            endpoint,
+            failure(at=first_started + timedelta(minutes=45)),
+            runtime_config,
+        )
         await session.commit()
 
         incidents = (
             await session.execute(select(Incident).order_by(Incident.started_at))
         ).scalars().all()
         assert len(incidents) == 2
+        assert incidents[0].status == IncidentStatus.RESOLVED.value
+        assert incidents[1].status == IncidentStatus.OPEN.value
+
+    async def test_a_flap_within_the_grouping_window_reopens_the_incident(
+        self, session, endpoint_factory, runtime_config
+    ):
+        """A quick down/up/down flap is one problem, not two incidents."""
+        endpoint = await endpoint_factory(failure_threshold=1)
+        first_started = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+        await record(session, endpoint, failure(at=first_started), runtime_config)
+        recorded_recovery = await record(
+            session,
+            endpoint,
+            success(at=first_started + timedelta(seconds=30)),
+            runtime_config,
+        )
+        first_incident_id = recorded_recovery.incident_closed.id
+
+        # Within incident_grouping_minutes (default 15) of the recovery above.
+        recorded_relapse = await record(
+            session,
+            endpoint,
+            failure(at=first_started + timedelta(minutes=5)),
+            runtime_config,
+        )
+        await session.commit()
+
+        incidents = (await session.execute(select(Incident))).scalars().all()
+        assert len(incidents) == 1
+        assert incidents[0].id == first_incident_id
+        assert incidents[0].status == IncidentStatus.OPEN.value
+        assert incidents[0].resolved_at is None
+        assert recorded_relapse.incident_opened.id == first_incident_id
+        kinds = [entry["kind"] for entry in incidents[0].timeline]
+        assert "reopened" in kinds
+
+    async def test_a_flap_is_not_regrouped_once_an_rca_exists(
+        self, session, endpoint_factory, runtime_config
+    ):
+        """An incident someone already wrote up is never silently reopened."""
+        from app.models.rca import Rca
+
+        endpoint = await endpoint_factory(failure_threshold=1)
+        first_started = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+        await record(session, endpoint, failure(at=first_started), runtime_config)
+        recorded_recovery = await record(
+            session,
+            endpoint,
+            success(at=first_started + timedelta(seconds=30)),
+            runtime_config,
+        )
+        first_incident_id = recorded_recovery.incident_closed.id
+        session.add(Rca(incident_id=first_incident_id, status="pending"))
+        await session.commit()
+
+        await record(
+            session,
+            endpoint,
+            failure(at=first_started + timedelta(minutes=5)),
+            runtime_config,
+        )
+        await session.commit()
+
+        incidents = (
+            await session.execute(select(Incident).order_by(Incident.started_at))
+        ).scalars().all()
+        assert len(incidents) == 2
+        assert incidents[0].id == first_incident_id
         assert incidents[0].status == IncidentStatus.RESOLVED.value
         assert incidents[1].status == IncidentStatus.OPEN.value
 
@@ -400,6 +483,49 @@ class TestAlerts:
             for alert in (await session.execute(select(Alert))).scalars().all()
         ]
         assert AlertType.HIGH_RESPONSE_TIME.value in types
+
+
+class TestThresholdResolution:
+    """Endpoint override -> environment override -> global setting."""
+
+    async def _stage_environment_override(self, session, *, failure_threshold):
+        environment = (
+            await session.execute(select(Environment).where(Environment.name == "staging"))
+        ).scalar_one()
+        environment.failure_threshold = failure_threshold
+        await session.commit()
+        return environment
+
+    async def test_environment_override_applies_with_no_endpoint_override(
+        self, session, endpoint_factory, runtime_config
+    ):
+        await self._stage_environment_override(session, failure_threshold=7)
+        endpoint = await endpoint_factory(environment="staging")
+        await session.refresh(endpoint, ["environment"])
+
+        thresholds = monitoring_service.resolve_thresholds(endpoint, runtime_config)
+        assert thresholds["failure_threshold"] == 7
+
+    async def test_endpoint_override_wins_over_environment_override(
+        self, session, endpoint_factory, runtime_config
+    ):
+        await self._stage_environment_override(session, failure_threshold=7)
+        endpoint = await endpoint_factory(environment="staging", failure_threshold=2)
+        await session.refresh(endpoint, ["environment"])
+
+        thresholds = monitoring_service.resolve_thresholds(endpoint, runtime_config)
+        assert thresholds["failure_threshold"] == 2
+
+    async def test_global_setting_applies_with_no_overrides_at_all(
+        self, session, endpoint_factory, runtime_config
+    ):
+        endpoint = await endpoint_factory(environment="staging")
+        await session.refresh(endpoint, ["environment"])
+
+        thresholds = monitoring_service.resolve_thresholds(
+            endpoint, {**runtime_config, "failure_threshold": 9}
+        )
+        assert thresholds["failure_threshold"] == 9
 
 
 class TestCertificatePersistence:

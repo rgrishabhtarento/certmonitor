@@ -45,6 +45,7 @@ class MonitoringResultRead(ORMModel):
 
     is_manual: bool = False
     checked_by: str | None = None
+    retry_count: int = 0
 
 
 class CheckNowResponse(BaseModel):
@@ -78,6 +79,7 @@ class CheckNowResponse(BaseModel):
     checked_at: datetime
     certificate: "SslCertificateRead | None" = None
     incident_opened: int | None = None
+    retry_count: int = 0
     incident_closed: int | None = None
 
 

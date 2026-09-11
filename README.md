@@ -500,7 +500,7 @@ URLs per request.
 | Group | Fields |
 |---|---|
 | Identity | Name, URL, check type (`http` / `tls` / `tcp`), HTTP method, port |
-| Organisation | Environment, tags, description, owner, team, application |
+| Organisation | Environment, tags, description, owner, team, application, depends-on (other monitored endpoints) |
 | Scheduling | Monitoring enabled, paused, interval, timeout |
 | Expectations | Expected HTTP status (`200`, `200,204`, `2xx`, `200-299`), expected body content, follow redirects |
 | TLS | SSL monitoring enabled, verify chain, per-endpoint warning/critical days |
@@ -592,11 +592,23 @@ only the authentication *type* — because an export leaves the application.
 | Data / incident / audit / alert retention | Independent retention windows. |
 | Uptime SLA target | The reference line on the dashboard. |
 | Selectable intervals | Which intervals the endpoint form offers. |
+| Incident grouping window | A failure within this many minutes of an endpoint's last recovery reopens that incident instead of starting a new one — unless it already has an RCA, which is never silently reopened. |
+| Latency anomaly multiplier | How many times its own baseline a response has to slow down before Diagnose calls it degraded. |
+| Intermittent-failure availability threshold | Below this recent-checks pass rate, Diagnose reports "intermittent failure" even though the endpoint answers right now. |
+| Deployment correlation window | How close a deployment's completion has to be to a failure to count as correlated. |
+| Check retry attempts / delay | Off by default. When set, a check that fails on a transport-level problem (timeout, connection refused, DNS) is retried before being recorded as a failure — never an HTTP status or body mismatch, which a retry cannot fix. A retried-but-recovered check still records its retry count, so it stays visible to intermittent-failure detection instead of reading like a clean pass. |
 
 Values are validated as a batch — one bad value rejects the whole update rather
 than applying half of it. Intervals below `MIN_MONITOR_INTERVAL` are refused
 even if the row is edited directly, so a monitor cannot be turned into a load
 generator.
+
+**Environments can override several of these per environment**, sitting
+between a per-endpoint override and the global setting: failure threshold,
+SSL warning/critical days and response-time threshold. Resolution order is
+endpoint override → environment override → global setting. Leaving an
+environment's override blank means "inherit" — existing environments behave
+exactly as before until one is explicitly set.
 
 Changing an SSL threshold **re-grades every stored certificate immediately**
 rather than waiting for each endpoint's next check.
@@ -1077,13 +1089,19 @@ signal to challenge.
 
 ### Confidence is computed, not asserted
 
-**High** requires both more than one independent signal *and* a clear margin
-over the runner-up. A single observation with nothing contradicting it is
-**Medium** — one probe can mislead, and sounding certain on the strength of it
-is the failure mode that costs an hour. Two explanations fitting equally well
-lowers confidence rather than picking one.
+Five bands: **Very High**, **High**, **Medium**, **Low**, **Unknown**.
 
-### It never invents infrastructure
+**Very High** needs several independent signals agreeing with a wide margin
+over the runner-up — nothing else comes close. **High** requires both more
+than one independent signal *and* a clear margin over the runner-up. A single
+observation with nothing contradicting it is **Medium** at best — one probe
+can mislead, and sounding certain on the strength of it is the failure mode
+that costs an hour. Two explanations fitting equally well lowers confidence
+rather than picking one. **Unknown** is not a low-confidence guess — it means
+nothing could be scored at all, which is a different, more honest statement
+than Low.
+
+### It never invents infrastructure it cannot see
 
 This is the rule that matters most. InfraSight watches an endpoint from the
 outside; it has no view of pods, containers, CPU, memory or databases. So it
@@ -1094,7 +1112,15 @@ says so, in a **Not observable** section as prominent as the evidence:
 | Container / pod state | Not visible from InfraSight |
 | Host resources | Not visible from InfraSight |
 | Application logs | Not visible from InfraSight |
-| Upstream dependencies | Not modelled |
+| Upstream dependencies (network calls, protocols) | Not modelled |
+
+**Declared** dependencies are the one exception, and a deliberately narrow
+one: an endpoint can name another endpoint InfraSight *already monitors* as
+something it depends on (Endpoints → edit → **Depends on**). This adds no new
+access and does not discover anything — it is a relationship an operator
+states, reused as one more signal: "this is down, and so is the dependency it
+declared" becomes evidence, shown in **Declared dependencies** on the
+evidence list.
 
 Every statement in the report is tagged **Observed**, **Inferred** or **Not
 checked**. A tool with no cluster access reporting "Pod is CrashLoopBackOff" is
@@ -1384,6 +1410,9 @@ leaves the server, and the same question always returns the same rows.
 | `recovery_checks_required` | 3 | Consecutive passing checks before calling something recovered |
 | `deployment_correlation_minutes` | 30 | Window for reporting a deployment/failure correlation |
 | `incident_grouping_minutes` | 15 | Window for treating repeated failures as one problem |
+| `intermittent_availability_threshold_pct` | 95.0 | Recent-checks pass rate below which Diagnose reports "intermittent failure" |
+| `check_retry_attempts` | 0 (off) | Retries a transport-level check failure this many times before recording it |
+| `check_retry_delay_ms` | 500 | Pause between a failed attempt and its retry |
 
 ---
 

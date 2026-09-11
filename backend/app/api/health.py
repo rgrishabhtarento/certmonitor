@@ -26,7 +26,6 @@ logger = get_logger(__name__)
 
 router = APIRouter(tags=["Health"])
 
-APP_VERSION = "1.0.0"
 _STARTED_AT = time.monotonic()
 
 _HEALTHY = "healthy"
@@ -148,7 +147,7 @@ async def health(response: Response, session: DbSession) -> HealthResponse:
 
     return HealthResponse(
         status=overall,
-        version=APP_VERSION,
+        version=settings.APP_VERSION,
         environment=settings.APP_ENV,
         uptime_seconds=round(time.monotonic() - _STARTED_AT, 2),
         database=database.status,

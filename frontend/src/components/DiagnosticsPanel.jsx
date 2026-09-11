@@ -103,6 +103,10 @@ const SEVERITY_STYLE = {
 }
 
 const CONFIDENCE_COPY = {
+  very_high: {
+    label: 'Very high confidence',
+    why: 'Several independent signals agree, with nothing else close.',
+  },
   high: {
     label: 'High confidence',
     why: 'Several independent signals point the same way.',
@@ -114,6 +118,10 @@ const CONFIDENCE_COPY = {
   low: {
     label: 'Low confidence',
     why: 'Thin evidence. Treat this as a lead, not a conclusion.',
+  },
+  unknown: {
+    label: 'Unknown confidence',
+    why: 'Nothing could be scored - there is no evidence to rank, not just a weak signal.',
   },
 }
 

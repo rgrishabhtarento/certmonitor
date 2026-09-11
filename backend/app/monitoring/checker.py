@@ -128,6 +128,13 @@ class CheckTarget:
     # does not opt in.
     health_path_candidates: list[str] = field(default_factory=list)
 
+    # Off by default, so existing behaviour and uptime math are unchanged
+    # until an operator opts in. Retries only ever cover transport-level
+    # failures (timeout, connection refused, DNS) - never an HTTP status or
+    # body mismatch, which a retry cannot fix and would only delay reporting.
+    retry_attempts: int = 0
+    retry_delay_ms: int = 500
+
 
 @dataclass
 class CheckOutcome:
@@ -164,6 +171,13 @@ class CheckOutcome:
     tls_version: str | None = None
     tls_cipher: str | None = None
     certificate: CertificateInfo | None = None
+
+    # How many retries it took to reach this outcome. 0 means the first
+    # attempt already produced it - the common case, and the only possible
+    # value while retries are off. Recorded rather than silently absorbed, so
+    # a success-after-retry is still visible to the intermittent-failure
+    # detector instead of looking identical to a clean pass.
+    retry_count: int = 0
 
     @property
     def is_up(self) -> bool:
@@ -255,8 +269,53 @@ def _filter_response_headers(headers: httpx.Headers) -> dict[str, str]:
     return captured
 
 
+class _RedirectToBlockedAddress(Exception):
+    """Raised from the redirect-guard hook to abort following a bad hop."""
+
+
+async def _reject_redirect_to_blocked_address(response: httpx.Response) -> None:
+    """``response`` event hook: validate every redirect hop before httpx follows it.
+
+    ``is_blocked_address`` is already checked once, against the endpoint's own
+    resolved address, before the first request is sent. httpx then follows
+    redirects internally when ``follow_redirects`` is set, and without this
+    hook none of those hops are re-checked - a malicious or compromised
+    monitored host could 302 the worker into fetching a loopback or cloud
+    metadata address the endpoint itself was never allowed to target. This
+    hook runs on every response in the chain, including intermediate
+    redirects, before the next request is made.
+    """
+    if not response.is_redirect:
+        return
+    location = response.headers.get("location")
+    if not location:
+        return
+    try:
+        next_url = response.request.url.join(location)
+    except Exception:
+        return
+
+    default_port = 443 if next_url.scheme == "https" else 80
+    ip, _elapsed_ms, error = await resolve_host(
+        next_url.host,
+        next_url.port or default_port,
+        timeout=_PATH_PROBE_TIMEOUT_SECONDS,
+    )
+    if error or not ip:
+        # Let the follow-up request fail on its own terms (DNS failure etc.)
+        # rather than mask it as a policy refusal.
+        return
+    blocked, why = is_blocked_address(ip)
+    if blocked:
+        raise _RedirectToBlockedAddress(
+            f"Refusing to follow redirect to {next_url.host} ({ip}): {why}"
+        )
+
+
 def _classify_httpx_error(exc: Exception) -> tuple[str, str]:
     """Map a transport exception onto ``(failure_reason, message)``."""
+    if isinstance(exc, _RedirectToBlockedAddress):
+        return FailureReason.BLOCKED_TARGET.value, str(exc)
     if isinstance(exc, httpx.ConnectTimeout):
         return FailureReason.CONNECTION_TIMEOUT.value, "Connection timeout"
     if isinstance(exc, httpx.ReadTimeout):
@@ -295,6 +354,11 @@ async def _run_http_check(target: CheckTarget, outcome: CheckOutcome) -> CheckOu
         verify=target.verify_ssl,
         timeout=float(target.timeout_seconds),
         follow_redirects=target.follow_redirects,
+        event_hooks=(
+            {"response": [_reject_redirect_to_blocked_address]}
+            if target.follow_redirects
+            else None
+        ),
     )
     request_started = perf_counter()
     try:
@@ -588,8 +652,43 @@ async def _run_tls_check(target: CheckTarget, outcome: CheckOutcome) -> CheckOut
     return outcome
 
 
+_TRANSIENT_FAILURE_REASONS = frozenset({
+    FailureReason.DNS_FAILURE.value,
+    FailureReason.CONNECTION_REFUSED.value,
+    FailureReason.CONNECTION_TIMEOUT.value,
+    FailureReason.READ_TIMEOUT.value,
+})
+
+
 async def run_check(target: CheckTarget) -> CheckOutcome:
-    """Execute a full check: DNS, transport, protocol and certificate."""
+    """Execute a check, retrying a transport-level failure when opted in.
+
+    Retries are off by default (``retry_attempts=0``) and, when enabled, only
+    ever cover a failure that could plausibly be transient - DNS, connection
+    refused, connection or read timeout. An HTTP status mismatch, a body
+    mismatch, a TLS/certificate problem or a policy refusal is a real failure
+    of something that exists, and retrying it would only delay reporting a
+    fault the monitor exists to catch. The final outcome carries ``retry_count``
+    so a pass that only succeeded on a later attempt is still visible to the
+    intermittent-failure detector rather than looking like a clean first try.
+    """
+    attempts = max(0, int(target.retry_attempts))
+    outcome = await _run_check_once(target)
+    retry_count = 0
+    while (
+        retry_count < attempts
+        and outcome.failure_reason in _TRANSIENT_FAILURE_REASONS
+    ):
+        if target.retry_delay_ms:
+            await asyncio.sleep(target.retry_delay_ms / 1000.0)
+        retry_count += 1
+        outcome = await _run_check_once(target)
+    outcome.retry_count = retry_count
+    return outcome
+
+
+async def _run_check_once(target: CheckTarget) -> CheckOutcome:
+    """One full probe: DNS, transport, protocol and certificate."""
     outcome = CheckOutcome()
 
     # ------------------------------------------------------------- DNS
@@ -745,4 +844,6 @@ def build_target_from_endpoint(endpoint: Any, *, auth_secret: str | None = None,
         ssl_warning_days=int(warning_days),
         ssl_critical_days=int(critical_days),
         health_path_candidates=candidates,
+        retry_attempts=int(defaults.get("check_retry_attempts", 0) or 0),
+        retry_delay_ms=int(defaults.get("check_retry_delay_ms", 500) or 500),
     )

@@ -25,6 +25,11 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------ app
     APP_NAME: str = "InfraSight"
+    # Single source of truth for the running release. Reported by /health,
+    # OpenAPI and every worker heartbeat - not meant to be overridden per
+    # environment, but reads from the environment like everything else here
+    # so a container build can stamp it without editing source.
+    APP_VERSION: str = "1.0.0"
     APP_ENV: Literal["development", "testing", "staging", "production"] = "production"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"

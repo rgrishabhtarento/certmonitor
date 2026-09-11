@@ -293,7 +293,7 @@ def build_timeline(evidence: dict[str, Any]) -> list[dict[str, Any]]:
         entries.append(_entry(
             diagnosis.created_at, "diagnosis",
             f"Smart Diagnose: {diagnosis.headline} "
-            f"({diagnosis.confidence} confidence)",
+            f"({(diagnosis.confidence or '').replace('_', ' ')} confidence)",
             "diagnosis",
         ))
 
@@ -362,7 +362,8 @@ def build_draft(evidence: dict[str, Any]) -> dict[str, Any]:
     if diagnosis is not None:
         root_cause = (
             f"{diagnosis.root_cause or diagnosis.headline}\n\n"
-            f"Smart Diagnose reached this with {diagnosis.confidence} confidence "
+            f"Smart Diagnose reached this with "
+            f"{(diagnosis.confidence or '').replace('_', ' ')} confidence "
             f"at {diagnosis.created_at:%Y-%m-%d %H:%M} UTC"
         )
         if diagnosis.deepest_layer_ok:

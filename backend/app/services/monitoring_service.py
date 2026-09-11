@@ -47,6 +47,7 @@ from app.monitoring.ssl_inspect import CertificateInfo, classify_certificate
 from app.models.endpoint import Endpoint
 from app.models.incident import Incident
 from app.models.monitoring import MonitoringResult, SslCertificate
+from app.models.rca import Rca
 from app.services import alert_service
 
 logger = get_logger(__name__)
@@ -96,22 +97,41 @@ class RecordedCheck:
 
 
 # ------------------------------------------------------------- thresholds
+def _resolve(endpoint_value: Any, environment: Any, env_field: str, config: dict[str, Any], config_key: str, default: int) -> int:
+    """Endpoint override -> environment override -> global setting -> default."""
+    if endpoint_value is not None:
+        return int(endpoint_value)
+    env_value = getattr(environment, env_field, None) if environment is not None else None
+    if env_value is not None:
+        return int(env_value)
+    return int(config.get(config_key, default))
+
+
 def resolve_thresholds(endpoint: Endpoint, config: dict[str, Any]) -> dict[str, int]:
-    """Per-endpoint overrides win; otherwise the runtime settings apply."""
+    """Resolve every threshold: endpoint override, then environment, then setting.
+
+    A team can set a laxer failure threshold for all of ``staging`` without
+    touching every endpoint in it, while a single noisy endpoint can still
+    override that environment default for itself.
+    """
+    environment = endpoint.environment
     return {
-        "failure_threshold": int(
-            endpoint.failure_threshold or config.get("failure_threshold", 3)
+        "failure_threshold": _resolve(
+            endpoint.failure_threshold, environment, "failure_threshold",
+            config, "failure_threshold", 3,
         ),
         "recovery_threshold": int(config.get("recovery_threshold", 1)),
-        "ssl_warning_days": int(
-            endpoint.ssl_warning_days or config.get("ssl_warning_days", 30)
+        "ssl_warning_days": _resolve(
+            endpoint.ssl_warning_days, environment, "ssl_warning_days",
+            config, "ssl_warning_days", 30,
         ),
-        "ssl_critical_days": int(
-            endpoint.ssl_critical_days or config.get("ssl_critical_days", 7)
+        "ssl_critical_days": _resolve(
+            endpoint.ssl_critical_days, environment, "ssl_critical_days",
+            config, "ssl_critical_days", 7,
         ),
-        "response_time_threshold_ms": int(
-            endpoint.response_time_threshold_ms
-            or config.get("response_time_threshold_ms", 2000)
+        "response_time_threshold_ms": _resolve(
+            endpoint.response_time_threshold_ms, environment,
+            "response_time_threshold_ms", config, "response_time_threshold_ms", 2000,
         ),
     }
 
@@ -149,6 +169,8 @@ async def execute_check(
             "response_time_threshold_ms": thresholds["response_time_threshold_ms"],
             "health_path_discovery": config.get("health_path_discovery", False),
             "health_path_candidates": config.get("health_path_candidates"),
+            "check_retry_attempts": config.get("check_retry_attempts", 0),
+            "check_retry_delay_ms": config.get("check_retry_delay_ms", 500),
         },
     )
     return await run_check(target)
@@ -313,6 +335,75 @@ async def _get_open_incident(
     ).scalar_one_or_none()
 
 
+async def _find_regroupable_incident(
+    session: AsyncSession,
+    endpoint_id: uuid.UUID,
+    *,
+    since: datetime,
+) -> Incident | None:
+    """A just-resolved incident on this endpoint that a new failure should join.
+
+    ``incident_grouping_minutes`` exists so a flap - down, briefly recovers,
+    down again - reads as one problem instead of a wall of separate incidents
+    and duplicate alerts. Only a resolved incident with no RCA is eligible: one
+    already written up should not silently be extended with a second, unrelated
+    occurrence's data underneath its owner's back.
+    """
+    incident = (
+        await session.execute(
+            select(Incident)
+            .where(
+                Incident.endpoint_id == endpoint_id,
+                Incident.status == IncidentStatus.RESOLVED.value,
+                Incident.resolved_at.is_not(None),
+                Incident.resolved_at >= since,
+            )
+            .order_by(Incident.resolved_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if incident is None:
+        return None
+
+    has_rca = (
+        await session.execute(select(Rca.id).where(Rca.incident_id == incident.id))
+    ).first()
+    if has_rca is not None:
+        return None
+
+    return incident
+
+
+def _reopen_incident(
+    incident: Incident, outcome: CheckOutcome, *, failed_checks: int
+) -> Incident:
+    incident.status = IncidentStatus.OPEN.value
+    incident.resolved_at = None
+    incident.duration_seconds = None
+    incident.recovery_status_code = None
+    incident.recovery_response_time_ms = None
+    incident.failed_check_count = (incident.failed_check_count or 0) + failed_checks
+    incident.reason = outcome.failure_reason
+    incident.error_message = outcome.error_message
+    timeline = list(incident.timeline or [])
+    timeline.append(
+        _timeline_entry(
+            "reopened",
+            f"Failed again within the grouping window - "
+            f"{humanise_reason(outcome.failure_reason)}: "
+            f"{outcome.error_message or 'no further detail'}",
+            outcome.checked_at,
+        )
+    )
+    incident.timeline = timeline[-50:]
+    logger.info(
+        "incident_reopened",
+        incident_id=incident.id,
+        reason=outcome.failure_reason,
+    )
+    return incident
+
+
 def _close_incident(
     incident: Incident, outcome: CheckOutcome
 ) -> Incident:
@@ -383,6 +474,7 @@ async def record_check_result(
         ssl_status=outcome.ssl_status,
         checked_by=checked_by,
         is_manual=is_manual,
+        retry_count=outcome.retry_count,
     )
     session.add(result)
 
@@ -527,9 +619,20 @@ async def record_check_result(
                 open_incident.reason = outcome.failure_reason
                 open_incident.error_message = outcome.error_message
         elif failures >= threshold:
-            incident = await _open_incident(
-                session, endpoint, outcome, failed_checks=failures
+            grouping_minutes = int(config.get("incident_grouping_minutes", 15))
+            regroupable = await _find_regroupable_incident(
+                session,
+                endpoint.id,
+                since=now - timedelta(minutes=grouping_minutes),
             )
+            if regroupable is not None:
+                incident = _reopen_incident(
+                    regroupable, outcome, failed_checks=failures
+                )
+            else:
+                incident = await _open_incident(
+                    session, endpoint, outcome, failed_checks=failures
+                )
             recorded.incident_opened = incident
             alert = await alert_service.raise_alert(
                 session,

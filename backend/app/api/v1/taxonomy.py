@@ -267,6 +267,10 @@ async def create_environment(
         color=payload.color,
         sort_order=payload.sort_order,
         is_active=payload.is_active,
+        failure_threshold=payload.failure_threshold,
+        ssl_warning_days=payload.ssl_warning_days,
+        ssl_critical_days=payload.ssl_critical_days,
+        response_time_threshold_ms=payload.response_time_threshold_ms,
     )
     session.add(environment)
     await session.flush()
@@ -327,6 +331,10 @@ async def update_environment(
     environment.color = payload.color
     environment.sort_order = payload.sort_order
     environment.is_active = payload.is_active
+    environment.failure_threshold = payload.failure_threshold
+    environment.ssl_warning_days = payload.ssl_warning_days
+    environment.ssl_critical_days = payload.ssl_critical_days
+    environment.response_time_threshold_ms = payload.response_time_threshold_ms
 
     await audit_service.record(
         session,

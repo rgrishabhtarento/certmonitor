@@ -62,10 +62,11 @@ class TestRanking:
         ranked, _ = rank([_candidate("real", [DIRECT]), _candidate("empty", [])])
         assert [c["cause"] for c in ranked] == ["real"]
 
-    def test_nothing_scored_is_low_confidence(self):
+    def test_nothing_scored_is_unknown_confidence(self):
+        """No evidence at all is a different, more honest state than 'low'."""
         ranked, confidence = rank([])
         assert ranked == []
-        assert confidence == Confidence.LOW.value
+        assert confidence == Confidence.UNKNOWN.value
 
 
 class TestConfidence:
@@ -86,6 +87,14 @@ class TestConfidence:
             _candidate("other", [CIRCUMSTANTIAL]),
         ])
         assert confidence == Confidence.HIGH.value
+
+    def test_overwhelming_agreement_is_very_high(self):
+        """Several strong signals with nothing else close is the top band."""
+        _, confidence = rank([
+            _candidate("leader", [DIRECT, STRONG, SUPPORTING]),
+            _candidate("other", [CIRCUMSTANTIAL]),
+        ])
+        assert confidence == Confidence.VERY_HIGH.value
 
     def test_a_close_second_place_lowers_confidence(self):
         """Two explanations fitting equally well is exactly when not to be sure."""
@@ -273,3 +282,53 @@ class TestEvidenceStructure:
             kind=EvidenceKind.UNKNOWN.value,
         ).as_dict()
         assert payload["kind"] == EvidenceKind.UNKNOWN.value
+
+
+class TestDependencyCorrelation:
+    """Dependency-aware diagnostics: a declared relationship between two
+    endpoints InfraSight already monitors, not a real dependency-graph probe.
+    """
+
+    class _Dependency:
+        def __init__(self, id_, name, status):
+            self.id = id_
+            self.name = name
+            self.current_status = status
+
+    class _Endpoint:
+        def __init__(self, dependencies):
+            self.dependencies = dependencies
+
+    def test_no_declared_dependencies(self):
+        from app.services.diagnostics_service import _dependency_correlation
+
+        result = _dependency_correlation(self._Endpoint([]))
+        assert result == {"declared_count": 0, "unhealthy": []}
+
+    def test_flags_unhealthy_declared_dependencies(self):
+        from app.core.enums import EndpointStatus
+        from app.services.diagnostics_service import _dependency_correlation
+
+        endpoint = self._Endpoint([
+            self._Dependency("1", "db-proxy", EndpointStatus.UP.value),
+            self._Dependency("2", "auth-service", EndpointStatus.DOWN.value),
+            self._Dependency("3", "cache", EndpointStatus.DEGRADED.value),
+        ])
+
+        result = _dependency_correlation(endpoint)
+
+        assert result["declared_count"] == 3
+        assert {d["name"] for d in result["unhealthy"]} == {"auth-service", "cache"}
+
+    def test_all_healthy_dependencies_report_no_unhealthy_ones(self):
+        from app.core.enums import EndpointStatus
+        from app.services.diagnostics_service import _dependency_correlation
+
+        endpoint = self._Endpoint([
+            self._Dependency("1", "db-proxy", EndpointStatus.UP.value),
+        ])
+
+        result = _dependency_correlation(endpoint)
+
+        assert result["declared_count"] == 1
+        assert result["unhealthy"] == []

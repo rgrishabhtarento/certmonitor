@@ -26,7 +26,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.branding import router as branding_router
-from app.api.health import APP_VERSION, router as health_router
+from app.api.health import router as health_router
 from app.api.v1 import api_router
 from app.core.config import settings
 from app.core.database import SessionFactory, dispose_engine
@@ -146,7 +146,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
         "api_starting",
-        version=APP_VERSION,
+        version=settings.APP_VERSION,
         environment=settings.APP_ENV,
         worker_enabled=settings.WORKER_ENABLED,
     )
@@ -184,7 +184,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="InfraSight API",
         description=DESCRIPTION,
-        version=APP_VERSION,
+        version=settings.APP_VERSION,
         openapi_tags=TAGS_METADATA,
         docs_url="/api/docs",
         redoc_url="/api/redoc",

@@ -273,7 +273,7 @@ async def create_endpoint(
         request=request,
     )
     await session.commit()
-    await session.refresh(endpoint, ["tags", "environment"])
+    await session.refresh(endpoint, ["tags", "environment", "dependencies"])
     return endpoint_to_read(endpoint, created_by=user.username)
 
 
@@ -335,7 +335,7 @@ async def update_endpoint(
         request=request,
     )
     await session.commit()
-    await session.refresh(endpoint, ["tags", "environment"])
+    await session.refresh(endpoint, ["tags", "environment", "dependencies"])
     return endpoint_to_read(endpoint, updated_by=user.username)
 
 
@@ -396,7 +396,7 @@ async def set_monitoring_state(
         request=request,
     )
     await session.commit()
-    await session.refresh(endpoint, ["tags", "environment"])
+    await session.refresh(endpoint, ["tags", "environment", "dependencies"])
     return endpoint_to_read(endpoint)
 
 
@@ -544,6 +544,7 @@ async def check_endpoint_now(
         certificate=certificate,
         incident_opened=incident_opened,
         incident_closed=incident_closed,
+        retry_count=outcome.retry_count,
     )
 
 

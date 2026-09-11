@@ -7,6 +7,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Float,
     ForeignKey,
@@ -16,6 +17,7 @@ from sqlalchemy import (
     Table,
     Text,
     Uuid,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -59,6 +61,30 @@ class Tag(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
 
+endpoint_dependencies = Table(
+    "endpoint_dependencies",
+    Base.metadata,
+    Column(
+        "endpoint_id",
+        Uuid(as_uuid=True),
+        ForeignKey("endpoints.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "depends_on_endpoint_id",
+        Uuid(as_uuid=True),
+        ForeignKey("endpoints.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("created_at", TimestampTZ, nullable=False, server_default=func.now()),
+    CheckConstraint(
+        "endpoint_id <> depends_on_endpoint_id",
+        name="ck_endpoint_dependencies_not_self",
+    ),
+    Index("ix_endpoint_dependencies_depends_on", "depends_on_endpoint_id"),
+)
+
+
 class Environment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Environments are rows, not an enum, so teams can add their own."""
 
@@ -70,6 +96,16 @@ class Environment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     color: Mapped[str | None] = mapped_column(String(16))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # Optional overrides, sitting between a per-endpoint override and the
+    # global runtime setting: NULL means "inherit". Lets a team say "anything
+    # in staging gets a laxer failure threshold" without touching every
+    # endpoint in it - see monitoring_service.resolve_thresholds for the
+    # resolution order.
+    failure_threshold: Mapped[int | None] = mapped_column(Integer)
+    ssl_warning_days: Mapped[int | None] = mapped_column(Integer)
+    ssl_critical_days: Mapped[int | None] = mapped_column(Integer)
+    response_time_threshold_ms: Mapped[int | None] = mapped_column(Integer)
 
     endpoints: Mapped[list["Endpoint"]] = relationship(back_populates="environment")
 
@@ -118,6 +154,20 @@ class Endpoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="endpoints",
         lazy="selectin",
         order_by=Tag.name,
+    )
+    # Other endpoints this one depends on (its database's health-check proxy,
+    # a shared auth service, ...). Read-only here; writes go through the
+    # association table directly in endpoint_service, which keeps the
+    # self-referential many-to-many simple rather than fighting the ORM's
+    # cascade rules for it.
+    dependencies: Mapped[list["Endpoint"]] = relationship(
+        "Endpoint",
+        secondary=endpoint_dependencies,
+        primaryjoin="Endpoint.id == endpoint_dependencies.c.endpoint_id",
+        secondaryjoin="Endpoint.id == endpoint_dependencies.c.depends_on_endpoint_id",
+        lazy="selectin",
+        viewonly=True,
+        order_by="Endpoint.name",
     )
 
     description: Mapped[str | None] = mapped_column(Text)

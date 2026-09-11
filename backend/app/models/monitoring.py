@@ -85,6 +85,12 @@ class MonitoringResult(Base):
     checked_by: Mapped[str | None] = mapped_column(String(64))
     is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # How many retries it took to reach this result. 0 (the default, and the
+    # only possible value while check_retry_attempts is off) means the first
+    # attempt already produced it. Kept so a success-after-retry stays visible
+    # to intermittent-failure detection instead of reading like a clean pass.
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
 
 class SslCertificate(Base):
     """A certificate observation.

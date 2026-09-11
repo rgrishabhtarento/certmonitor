@@ -58,6 +58,8 @@ from app.monitoring import transport as transport_module
 from app.monitoring.checker import build_headers, build_target_from_endpoint
 from app.monitoring.ssl_inspect import probe_tls
 from app.monitoring.validators import is_blocked_address
+from app.services import settings_service
+from app.services.monitoring_service import resolve_thresholds
 from app.services.diagnosis_reasoning import (
     CIRCUMSTANTIAL,
     DIRECT,
@@ -85,12 +87,14 @@ MAX_ADDRESSES = 4
 HISTORY_WINDOW_HOURS = 24
 HISTORY_SAMPLE = 200
 
-# How far back to look for a deployment that could explain the failure, and
-# how close it has to be to count as a correlation. Ninety minutes is
-# generous on purpose: a bad release often degrades slowly rather than
-# failing the instant it lands.
+# How far back to look for a deployment that could explain the failure.
+# How close it has to be to count as a correlation is the runtime
+# "deployment_correlation_minutes" setting (default below matches
+# settings_service's own default so behaviour is unchanged until someone
+# edits it) - a bad release often degrades slowly rather than failing the
+# instant it lands, so this is deliberately generous.
 CHANGE_LOOKBACK_HOURS = 24
-CHANGE_CORRELATION_MINUTES = 90
+DEFAULT_CHANGE_CORRELATION_MINUTES = 30
 
 # Window for "has this happened before" - long enough to expose a weekly
 # pattern, short enough that a fix from last quarter does not muddy it.
@@ -98,9 +102,11 @@ RECURRENCE_WINDOW_DAYS = 30
 
 # How many recent checks the availability strip shows.
 RECENT_STRIP_SIZE = 30
-# A response this many times its own baseline is treated as degradation
-# rather than noise.
-LATENCY_ANOMALY_RATIO = 2.0
+# Fallback defaults for the "latency_anomaly_multiplier" and
+# "intermittent_availability_threshold_pct" settings, matching
+# settings_service's own defaults, used only if settings could not be loaded.
+DEFAULT_LATENCY_ANOMALY_RATIO = 3.0
+DEFAULT_INTERMITTENT_THRESHOLD_PCT = 95.0
 
 OK = "ok"
 FAILED = "failed"
@@ -281,7 +287,13 @@ async def _tcp_stage(addresses: list[str], port: int) -> Layer:
 
 
 # --------------------------------------------------------------- TLS stage
-async def _tls_stage(endpoint: Endpoint, address: str | None) -> Layer:
+async def _tls_stage(
+    endpoint: Endpoint,
+    address: str | None,
+    *,
+    warning_days: int = 30,
+    critical_days: int = 7,
+) -> Layer:
     if endpoint.protocol != "https":
         return Layer(
             layer="tls", status=SKIPPED,
@@ -291,7 +303,7 @@ async def _tls_stage(endpoint: Endpoint, address: str | None) -> Layer:
     started = perf_counter()
     verified = await probe_tls(
         endpoint.hostname, endpoint.port,
-        timeout=PROBE_TIMEOUT, warning_days=30, critical_days=7,
+        timeout=PROBE_TIMEOUT, warning_days=warning_days, critical_days=critical_days,
         verify=True, resolved_ip=address,
     )
     elapsed = round((perf_counter() - started) * 1000, 1)
@@ -325,7 +337,7 @@ async def _tls_stage(endpoint: Endpoint, address: str | None) -> Layer:
     # not trusted" from "nothing is listening" - completely different fixes.
     unverified = await probe_tls(
         endpoint.hostname, endpoint.port,
-        timeout=PROBE_TIMEOUT, warning_days=30, critical_days=7,
+        timeout=PROBE_TIMEOUT, warning_days=warning_days, critical_days=critical_days,
         verify=False, resolved_ip=address,
     )
     data["verification_error"] = verified.verification_error or verified.error
@@ -680,6 +692,28 @@ async def _application_summary(
     }
 
 
+# ------------------------------------------------------- dependencies
+def _dependency_correlation(endpoint: Endpoint) -> dict[str, Any]:
+    """Are any of this endpoint's declared dependencies also unhealthy?
+
+    A dependency here is just another endpoint InfraSight already monitors -
+    a database's health-check proxy, a shared auth service - declared by the
+    operator, not discovered. No cluster access and no protocol-specific
+    probing is involved; this only reads state InfraSight was already
+    watching independently.
+    """
+    declared = list(endpoint.dependencies or [])
+    unhealthy = [
+        {"id": dep.id, "name": dep.name, "status": dep.current_status}
+        for dep in declared
+        if dep.current_status in (EndpointStatus.DOWN.value, EndpointStatus.DEGRADED.value)
+    ]
+    return {
+        "declared_count": len(declared),
+        "unhealthy": unhealthy,
+    }
+
+
 # ------------------------------------------------------ failure onset
 async def _failure_onset(
     session: AsyncSession, endpoint: Endpoint
@@ -710,7 +744,11 @@ async def _failure_onset(
 
 # --------------------------------------------------- deployment correlation
 async def _change_correlation(
-    session: AsyncSession, endpoint: Endpoint, onset: datetime | None
+    session: AsyncSession,
+    endpoint: Endpoint,
+    onset: datetime | None,
+    *,
+    correlation_minutes: int = DEFAULT_CHANGE_CORRELATION_MINUTES,
 ) -> dict[str, Any]:
     """Did a deployment happen just before this started failing?
 
@@ -798,7 +836,7 @@ async def _change_correlation(
     closest = None
     for item in described:
         gap = item["minutes_before_failure"]
-        if gap is not None and 0 <= gap <= CHANGE_CORRELATION_MINUTES:
+        if gap is not None and 0 <= gap <= correlation_minutes:
             closest = item
             break
 
@@ -806,7 +844,7 @@ async def _change_correlation(
         "active_deployment": describe(active, gap_from=None) if active else None,
         "recent": described,
         "closest": closest,
-        "correlation_window_minutes": CHANGE_CORRELATION_MINUTES,
+        "correlation_window_minutes": correlation_minutes,
         "failure_started_at": onset,
     }
 
@@ -936,6 +974,9 @@ def _build_evidence(
     changes: dict[str, Any],
     incidents: dict[str, Any],
     app_summary: dict[str, Any] | None,
+    *,
+    latency_anomaly_ratio: float = DEFAULT_LATENCY_ANOMALY_RATIO,
+    dependencies: dict[str, Any] | None = None,
 ) -> list[Evidence]:
     """The observations the conclusion rests on, in the order they were made.
 
@@ -971,7 +1012,7 @@ def _build_evidence(
     current = history.get("current_response_time_ms")
     ratio = history.get("latency_ratio")
     if baseline and current:
-        if ratio and ratio >= LATENCY_ANOMALY_RATIO:
+        if ratio and ratio >= latency_anomaly_ratio:
             items.append(
                 Evidence(
                     label="Response time",
@@ -1057,6 +1098,22 @@ def _build_evidence(
             )
         )
 
+    if dependencies and dependencies.get("declared_count"):
+        unhealthy = dependencies.get("unhealthy") or []
+        items.append(
+            Evidence(
+                label="Declared dependencies",
+                value=f"{len(unhealthy)} of {dependencies['declared_count']} unhealthy",
+                status=FAILED if unhealthy else OK,
+                detail=(
+                    "Down/degraded: " + ", ".join(d["name"] for d in unhealthy)
+                    if unhealthy
+                    else "All declared dependencies are healthy."
+                ),
+                kind=EvidenceKind.INFERRED.value,
+            )
+        )
+
     return items
 
 
@@ -1069,6 +1126,10 @@ def _analyse(
     changes: dict[str, Any],
     incidents: dict[str, Any],
     app_summary: dict[str, Any] | None,
+    *,
+    latency_anomaly_ratio: float = DEFAULT_LATENCY_ANOMALY_RATIO,
+    intermittent_threshold_pct: float = DEFAULT_INTERMITTENT_THRESHOLD_PCT,
+    dependencies: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Turn evidence into a ranked diagnosis.
 
@@ -1188,6 +1249,42 @@ def _analyse(
                 "\"import socket;print(socket.getaddrinfo('example.com',443))\""
             ),
             command_note="Resolve and connect from inside the worker container.",
+        ))
+
+    # ------------------------------------------------------------------
+    # 1b. A declared dependency is also unhealthy.
+    # ------------------------------------------------------------------
+    dependency_info = dependencies or {"declared_count": 0, "unhealthy": []}
+    unhealthy_dependencies = dependency_info.get("unhealthy") or []
+    any_layer_failed = any(
+        layer and layer.status == FAILED for layer in (dns, tcp, tls, http)
+    )
+    if any_layer_failed and unhealthy_dependencies:
+        names = ", ".join(d["name"] for d in unhealthy_dependencies[:3])
+        remainder = len(unhealthy_dependencies) - 3
+        if remainder > 0:
+            names = f"{names} and {remainder} more"
+        cand(
+            "dependency_failure",
+            "A declared dependency is unavailable",
+            "This endpoint depends on another monitored endpoint that is "
+            "currently down or degraded - a common cause for exactly this "
+            "kind of failure.",
+        ).add(STRONG, f"declared dependency also unhealthy: {names}")
+        findings.append(Finding(
+            severity="high",
+            title="A declared dependency is also unhealthy",
+            detail=(
+                f"{endpoint.name} depends on {names}, which "
+                f"{'is' if len(unhealthy_dependencies) == 1 else 'are'} "
+                "currently down or degraded. This comes from a dependency "
+                "relationship you declared, not from anything discovered "
+                "automatically."
+            ),
+            action=(
+                "Check the dependency first - this endpoint may simply be "
+                "waiting on it."
+            ),
         ))
 
     # ------------------------------------------------------------------
@@ -1986,7 +2083,9 @@ def _analyse(
 
     availability = history.get("recent_availability_pct")
     transitions = history.get("state_transitions", 0)
-    intermittent = (availability is not None and availability < 95) or transitions >= 6
+    intermittent = (
+        availability is not None and availability < intermittent_threshold_pct
+    ) or transitions >= 6
 
     if intermittent:
         cand(
@@ -2059,7 +2158,7 @@ def _analyse(
         ])
 
     ratio = history.get("latency_ratio")
-    if ratio and ratio >= LATENCY_ANOMALY_RATIO:
+    if ratio and ratio >= latency_anomaly_ratio:
         baseline = history.get("baseline_response_time_ms")
         current = history.get("current_response_time_ms")
         cand(
@@ -2361,6 +2460,24 @@ async def diagnose(
     """
     started = perf_counter()
 
+    # Runtime settings, not module constants: an on-demand diagnosis must
+    # agree with the numbers Settings and ordinary monitoring actually use,
+    # not a second, independently hardcoded copy of them.
+    config = await settings_service.load_settings(session, use_cache=True)
+    thresholds = resolve_thresholds(endpoint, config)
+    latency_anomaly_ratio = float(
+        config.get("latency_anomaly_multiplier", DEFAULT_LATENCY_ANOMALY_RATIO)
+    )
+    intermittent_threshold_pct = float(
+        config.get(
+            "intermittent_availability_threshold_pct",
+            DEFAULT_INTERMITTENT_THRESHOLD_PCT,
+        )
+    )
+    correlation_minutes = int(
+        config.get("deployment_correlation_minutes", DEFAULT_CHANGE_CORRELATION_MINUTES)
+    )
+
     secret = (
         decrypt_secret(endpoint.auth_secret_encrypted)
         if endpoint.auth_secret_encrypted
@@ -2392,7 +2509,12 @@ async def diagnose(
     )
 
     tls = (
-        await _tls_stage(endpoint, first_ok)
+        await _tls_stage(
+            endpoint,
+            first_ok,
+            warning_days=thresholds["ssl_warning_days"],
+            critical_days=thresholds["ssl_critical_days"],
+        )
         if tcp.status in (OK, WARNING)
         else Layer(layer="tls", status=SKIPPED, detail="TCP did not connect")
     )
@@ -2414,15 +2536,21 @@ async def diagnose(
     history = await _history(session, endpoint)
     correlation = await _correlation(session, endpoint)
     onset = await _failure_onset(session, endpoint)
-    changes = await _change_correlation(session, endpoint, onset)
+    changes = await _change_correlation(
+        session, endpoint, onset, correlation_minutes=correlation_minutes
+    )
     incidents = await _incident_correlation(session, endpoint)
     recurrence = await _recurrence(session, endpoint)
     app_summary = await _application_summary(session, endpoint)
+    dependencies = _dependency_correlation(endpoint)
 
     # ------------------------------------------------------ reasoning
     result = _analyse(
         endpoint, layers, extras, history, correlation,
         changes, incidents, app_summary,
+        latency_anomaly_ratio=latency_anomaly_ratio,
+        intermittent_threshold_pct=intermittent_threshold_pct,
+        dependencies=dependencies,
     )
     verdict = result["verdict"]
     findings: list[Finding] = result["findings"]
@@ -2503,6 +2631,8 @@ async def diagnose(
         days_to_expiry=(tls.data.get("days_remaining") if tls else None),
         latency_ratio=history.get("latency_ratio"),
         application_down=is_total_application_outage(app_summary),
+        intermittent_threshold_pct=intermittent_threshold_pct,
+        latency_anomaly_ratio=latency_anomaly_ratio,
     )
 
     # --------------------------------------------- deepest layer that worked
@@ -2514,7 +2644,9 @@ async def diagnose(
             break
 
     evidence = _build_evidence(
-        endpoint, layers, history, changes, incidents, app_summary
+        endpoint, layers, history, changes, incidents, app_summary,
+        latency_anomaly_ratio=latency_anomaly_ratio,
+        dependencies=dependencies,
     )
     unknowns = blind_spots(has_change_data=bool(changes.get("recent")))
 

@@ -108,6 +108,14 @@ class TagWrite(BaseModel):
 
 
 # ----------------------------------------------------------- environments
+class EndpointDependencyRead(ORMModel):
+    """A declared dependency, shown with just enough to judge it at a glance."""
+
+    id: uuid.UUID
+    name: str
+    current_status: str
+
+
 class EnvironmentRead(ORMModel):
     id: uuid.UUID
     name: str
@@ -119,6 +127,13 @@ class EnvironmentRead(ORMModel):
     endpoint_count: int = 0
     created_at: datetime | None = None
 
+    # NULL means "inherit the global setting". See
+    # monitoring_service.resolve_thresholds for the full resolution order.
+    failure_threshold: int | None = None
+    ssl_warning_days: int | None = None
+    ssl_critical_days: int | None = None
+    response_time_threshold_ms: int | None = None
+
 
 class EnvironmentWrite(BaseModel):
     name: str = Field(min_length=1, max_length=64)
@@ -128,10 +143,27 @@ class EnvironmentWrite(BaseModel):
     sort_order: int = Field(default=100, ge=0, le=10_000)
     is_active: bool = True
 
+    failure_threshold: int | None = Field(default=None, ge=1, le=20)
+    ssl_warning_days: int | None = Field(default=None, ge=1, le=365)
+    ssl_critical_days: int | None = Field(default=None, ge=1, le=180)
+    response_time_threshold_ms: int | None = Field(default=None, ge=1, le=600_000)
+
     @field_validator("name")
     @classmethod
     def _normalise(cls, value: str) -> str:
         return value.strip().lower()
+
+    @model_validator(mode="after")
+    def _check_ssl_thresholds(self) -> "EnvironmentWrite":
+        if (
+            self.ssl_warning_days is not None
+            and self.ssl_critical_days is not None
+            and self.ssl_critical_days > self.ssl_warning_days
+        ):
+            raise ValueError(
+                "ssl_critical_days must be less than or equal to ssl_warning_days"
+            )
+        return self
 
 
 # -------------------------------------------------------------- endpoints
@@ -150,6 +182,15 @@ class EndpointBase(BaseModel):
     owner: str | None = Field(default=None, max_length=128)
     team: str | None = Field(default=None, max_length=128)
     application: str | None = Field(default=None, max_length=128)
+    dependency_ids: list[uuid.UUID] = Field(
+        default_factory=list,
+        max_length=20,
+        description=(
+            "Other monitored endpoints this one depends on - its database's "
+            "health-check proxy, a shared auth service, and so on. Used by "
+            "Diagnose to correlate a failure with a dependency also being down."
+        ),
+    )
 
     monitoring_enabled: bool = True
     is_paused: bool = False
@@ -253,6 +294,7 @@ class EndpointUpdate(BaseModel):
     owner: str | None = Field(default=None, max_length=128)
     team: str | None = Field(default=None, max_length=128)
     application: str | None = Field(default=None, max_length=128)
+    dependency_ids: list[uuid.UUID] | None = Field(default=None, max_length=20)
     monitoring_enabled: bool | None = None
     is_paused: bool | None = None
     interval_seconds: int | None = Field(default=None, ge=10, le=86400)
@@ -383,6 +425,7 @@ class EndpointRead(EndpointListItem):
     next_check_at: datetime | None = None
     created_by: str | None = None
     updated_by: str | None = None
+    dependencies: list[EndpointDependencyRead] = Field(default_factory=list)
 
 
 class EndpointStatusUpdate(BaseModel):

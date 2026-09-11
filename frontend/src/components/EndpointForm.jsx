@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, ChevronDown, ChevronRight, Lock } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronRight, Lock, Search } from 'lucide-react'
 
 import { Field, Modal, Spinner, TagInput, Toggle } from './ui'
 import { endpointsApi } from '../lib/api'
@@ -25,6 +25,7 @@ const EMPTY = {
   http_method: 'GET',
   environment: '',
   tags: [],
+  dependency_ids: [],
   description: '',
   owner: '',
   team: '',
@@ -94,6 +95,8 @@ export default function EndpointForm({ open, onClose, onSaved, endpoint, filters
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
+  const [allEndpoints, setAllEndpoints] = useState([])
+  const [dependencySearch, setDependencySearch] = useState('')
 
   useEffect(() => {
     if (!open) return
@@ -106,6 +109,7 @@ export default function EndpointForm({ open, onClose, onSaved, endpoint, filters
         ...endpoint,
         environment: endpoint.environment?.id || '',
         tags: (endpoint.tags || []).map((tag) => tag.name),
+        dependency_ids: (endpoint.dependencies || []).map((dep) => dep.id),
         interval_seconds: endpoint.interval_seconds ?? '',
         timeout_seconds: endpoint.timeout_seconds ?? '',
         expected_status_codes: endpoint.expected_status_codes ?? '',
@@ -139,6 +143,34 @@ export default function EndpointForm({ open, onClose, onSaved, endpoint, filters
   )
   const intervals = config?.allowed_intervals || [30, 60, 300, 600, 1800, 3600]
 
+  // Loaded so this endpoint can declare another monitored endpoint as a
+  // dependency - Diagnose then treats "both are down together" as evidence.
+  useEffect(() => {
+    if (!open) return
+    endpointsApi
+      .list({ page: 1, page_size: 200, include_uptime: false })
+      .then((data) => setAllEndpoints(data.items || []))
+      .catch(() => setAllEndpoints([]))
+  }, [open])
+
+  const dependencyCandidates = useMemo(
+    () => allEndpoints.filter((candidate) => candidate.id !== endpoint?.id),
+    [allEndpoints, endpoint],
+  )
+  const visibleDependencies = useMemo(() => {
+    const needle = dependencySearch.trim().toLowerCase()
+    const matches = dependencyCandidates.filter(
+      (e) =>
+        !needle ||
+        e.name.toLowerCase().includes(needle) ||
+        e.hostname.toLowerCase().includes(needle),
+    )
+    const chosen = dependencyCandidates.filter(
+      (e) => form.dependency_ids.includes(e.id) && !matches.includes(e),
+    )
+    return [...chosen, ...matches].slice(0, 80)
+  }, [dependencyCandidates, dependencySearch, form.dependency_ids])
+
   const set = (key) => (value) => setForm((current) => ({ ...current, [key]: value }))
   const setInput = (key) => (event) =>
     setForm((current) => ({ ...current, [key]: event.target.value }))
@@ -152,6 +184,7 @@ export default function EndpointForm({ open, onClose, onSaved, endpoint, filters
       http_method: form.http_method,
       environment: form.environment || null,
       tags: form.tags,
+      dependency_ids: form.dependency_ids,
       description: form.description || null,
       owner: form.owner || null,
       team: form.team || null,
@@ -457,6 +490,60 @@ export default function EndpointForm({ open, onClose, onSaved, endpoint, filters
 
         <Field label="Tags" hint="Type a name and press Enter. New tags are created as you go.">
           <TagInput value={form.tags} onChange={set('tags')} suggestions={tagSuggestions} />
+        </Field>
+
+        <Field
+          label={`Depends on (${form.dependency_ids.length} selected)`}
+          hint="Other monitored endpoints this one relies on. Diagnose reports it as evidence when a declared dependency is down at the same time."
+        >
+          <div className="rounded-lg border border-slate-300 dark:border-slate-700">
+            <div className="relative border-b border-slate-200 p-2 dark:border-slate-700">
+              <Search
+                size={14}
+                className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                className="input pl-7 text-xs"
+                placeholder="Filter endpoints…"
+                value={dependencySearch}
+                onChange={(event) => setDependencySearch(event.target.value)}
+              />
+            </div>
+            <div className="max-h-40 overflow-y-auto p-2">
+              {visibleDependencies.length === 0 ? (
+                <p className="px-1 py-2 text-xs text-slate-400">No endpoints match.</p>
+              ) : (
+                visibleDependencies.map((candidate) => (
+                  <label
+                    key={candidate.id}
+                    className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 shrink-0 rounded border-slate-300"
+                      checked={form.dependency_ids.includes(candidate.id)}
+                      onChange={() =>
+                        setForm((current) => ({
+                          ...current,
+                          dependency_ids: current.dependency_ids.includes(candidate.id)
+                            ? current.dependency_ids.filter((id) => id !== candidate.id)
+                            : [...current.dependency_ids, candidate.id],
+                        }))
+                      }
+                    />
+                    <span className="min-w-0 flex-1 truncate text-xs">
+                      <span className="font-medium text-slate-800 dark:text-slate-200">
+                        {candidate.name}
+                      </span>
+                      <span className="ml-1.5 font-mono text-[11px] text-slate-400">
+                        {candidate.hostname}
+                      </span>
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
         </Field>
 
         <Field label="Description">

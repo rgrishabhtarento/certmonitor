@@ -48,7 +48,6 @@ from app.services import (
 configure_logging()
 logger = get_logger(__name__)
 
-WORKER_VERSION = "1.0.0"
 SSL_SWEEP_INTERVAL_SECONDS = 3600
 
 
@@ -118,7 +117,7 @@ class MonitorWorker:
                             checks_completed=self._checks_completed,
                             checks_failed=self._checks_failed,
                             in_flight=self._in_flight,
-                            version=WORKER_VERSION,
+                            version=settings.APP_VERSION,
                             hostname=platform.node()[:128],
                             cpu_percent=resources["cpu_percent"],
                             memory_mb=resources["memory_mb"],
@@ -130,7 +129,7 @@ class MonitorWorker:
                     row.checks_completed = self._checks_completed
                     row.checks_failed = self._checks_failed
                     row.in_flight = self._in_flight
-                    row.version = WORKER_VERSION
+                    row.version = settings.APP_VERSION
                     # cpu_percent is None on the first heartbeat - a rate needs
                     # two samples - so keep the previous value rather than
                     # blanking a good reading.
@@ -480,7 +479,7 @@ class MonitorWorker:
             concurrency=self.concurrency,
             poll_interval=settings.WORKER_POLL_INTERVAL_SECONDS,
             batch_size=settings.WORKER_BATCH_SIZE,
-            version=WORKER_VERSION,
+            version=settings.APP_VERSION,
         )
 
         tasks = [

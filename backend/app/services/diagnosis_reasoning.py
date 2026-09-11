@@ -122,6 +122,12 @@ STRONG = 30
 SUPPORTING = 15
 CIRCUMSTANTIAL = 8
 
+# Above HIGH: reserved for a leader that several independent signals agree on,
+# by a wide margin over whatever comes second.
+VERY_HIGH_SCORE = 90
+VERY_HIGH_SIGNALS = 3
+VERY_HIGH_MARGIN = 40
+
 
 def _confidence(ranked: list[Candidate]) -> str:
     """Confidence in the leading candidate.
@@ -130,16 +136,24 @@ def _confidence(ranked: list[Candidate]) -> str:
     piece of evidence, and it must be clearly ahead. A single observation that
     happens to have no competition is Medium at best - one probe can be
     misleading, and saying High on the strength of it is exactly the
-    overconfidence that sends someone down the wrong path.
+    overconfidence that sends someone down the wrong path. Unknown is a
+    different, more honest statement than Low: it means nothing could be
+    scored at all, not that the evidence was merely thin.
     """
     if not ranked:
-        return Confidence.LOW.value
+        return Confidence.UNKNOWN.value
 
     leader = ranked[0]
     runner_up = ranked[1].score if len(ranked) > 1 else 0
     margin = leader.score - runner_up
     signals = len(leader.why)
 
+    if (
+        leader.score >= VERY_HIGH_SCORE
+        and signals >= VERY_HIGH_SIGNALS
+        and margin >= VERY_HIGH_MARGIN
+    ):
+        return Confidence.VERY_HIGH.value
     if leader.score >= DIRECT and signals >= 2 and margin >= STRONG:
         return Confidence.HIGH.value
     if leader.score >= DIRECT and signals >= 3:
@@ -197,6 +211,8 @@ def severity_for(
     days_to_expiry: int | None,
     latency_ratio: float | None,
     application_down: bool,
+    intermittent_threshold_pct: float = 95.0,
+    latency_anomaly_ratio: float = 3.0,
 ) -> str:
     """Classify how much attention this deserves.
 
@@ -240,12 +256,12 @@ def severity_for(
 
     # Intermittent is deliberately rated high: it is harder to catch than a
     # clean outage and is usually ignored until it becomes one.
-    if availability_pct is not None and availability_pct < 95:
+    if availability_pct is not None and availability_pct < intermittent_threshold_pct:
         return DiagnosisSeverity.HIGH.value
 
     if days_to_expiry is not None and 0 <= days_to_expiry <= 7:
         return DiagnosisSeverity.MEDIUM.value
-    if latency_ratio is not None and latency_ratio >= 3:
+    if latency_ratio is not None and latency_ratio >= latency_anomaly_ratio:
         return DiagnosisSeverity.MEDIUM.value
     if verdict in (
         "auth_required",

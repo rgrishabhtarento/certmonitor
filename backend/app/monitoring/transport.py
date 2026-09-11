@@ -132,6 +132,7 @@ def build_async_client(
     follow_redirects: bool,
     max_redirects: int = 10,
     http2: bool = False,
+    event_hooks: dict[str, list] | None = None,
 ) -> httpx.AsyncClient:
     """Create a single-use client for one endpoint check.
 
@@ -163,6 +164,7 @@ def build_async_client(
         limits=limits,
         http2=http2,
         trust_env=False,
+        event_hooks=event_hooks or {},
     )
 
 

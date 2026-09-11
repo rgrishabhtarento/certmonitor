@@ -25,6 +25,10 @@ const EMPTY = {
   color: '#2563eb',
   sort_order: 100,
   is_active: true,
+  failure_threshold: '',
+  ssl_warning_days: '',
+  ssl_critical_days: '',
+  response_time_threshold_ms: '',
 }
 
 export default function EnvironmentsPage() {
@@ -66,6 +70,10 @@ export default function EnvironmentsPage() {
             color: environment.color || '#2563eb',
             sort_order: environment.sort_order ?? 100,
             is_active: environment.is_active,
+            failure_threshold: environment.failure_threshold ?? '',
+            ssl_warning_days: environment.ssl_warning_days ?? '',
+            ssl_critical_days: environment.ssl_critical_days ?? '',
+            response_time_threshold_ms: environment.response_time_threshold_ms ?? '',
           }
         : EMPTY,
     )
@@ -89,6 +97,13 @@ export default function EnvironmentsPage() {
         color: form.color || null,
         sort_order: Number(form.sort_order) || 100,
         is_active: form.is_active,
+        failure_threshold: form.failure_threshold === '' ? null : Number(form.failure_threshold),
+        ssl_warning_days: form.ssl_warning_days === '' ? null : Number(form.ssl_warning_days),
+        ssl_critical_days: form.ssl_critical_days === '' ? null : Number(form.ssl_critical_days),
+        response_time_threshold_ms:
+          form.response_time_threshold_ms === ''
+            ? null
+            : Number(form.response_time_threshold_ms),
       }
       if (editing) await taxonomyApi.updateEnvironment(editing.id, payload)
       else await taxonomyApi.createEnvironment(payload)
@@ -332,6 +347,61 @@ export default function EnvironmentsPage() {
             label="Active"
             description="Inactive environments stay assignable but are de-emphasised in filters."
           />
+
+          <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+            <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+              Threshold overrides
+            </p>
+            <p className="mb-3 text-xs text-slate-400">
+              Blank inherits the global setting. Applies to every endpoint in
+              this environment that does not itself override the value.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Failure threshold" hint="Consecutive failures before an incident.">
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  className="input"
+                  value={form.failure_threshold}
+                  onChange={set('failure_threshold')}
+                  placeholder="Inherit"
+                />
+              </Field>
+              <Field label="Response time threshold (ms)" hint="Above this, a success is degraded.">
+                <input
+                  type="number"
+                  min={1}
+                  className="input"
+                  value={form.response_time_threshold_ms}
+                  onChange={set('response_time_threshold_ms')}
+                  placeholder="Inherit"
+                />
+              </Field>
+              <Field label="SSL warning days">
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  className="input"
+                  value={form.ssl_warning_days}
+                  onChange={set('ssl_warning_days')}
+                  placeholder="Inherit"
+                />
+              </Field>
+              <Field label="SSL critical days">
+                <input
+                  type="number"
+                  min={1}
+                  max={180}
+                  className="input"
+                  value={form.ssl_critical_days}
+                  onChange={set('ssl_critical_days')}
+                  placeholder="Inherit"
+                />
+              </Field>
+            </div>
+          </div>
         </form>
       </Modal>
 

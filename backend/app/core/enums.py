@@ -298,13 +298,18 @@ DIAGNOSIS_SEVERITY_ORDER: dict[str, int] = {
 class Confidence(StrEnum):
     """How well the evidence supports a conclusion.
 
-    Deliberately three coarse bands. A precise-looking percentage on a
-    handful of heuristics would imply a rigour that is not there.
+    Deliberately coarse bands rather than a precise-looking percentage, which
+    would imply a rigour that is not there. ``VERY_HIGH`` is reserved for a
+    leader resting on several independent signals with a wide margin over the
+    runner-up; ``UNKNOWN`` is for when nothing could be scored at all, which
+    is a different, more honest statement than a low-confidence guess.
     """
 
+    VERY_HIGH = "very_high"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
+    UNKNOWN = "unknown"
 
 
 class EvidenceKind(StrEnum):

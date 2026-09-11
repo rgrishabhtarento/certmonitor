@@ -197,6 +197,61 @@ class TestFailures:
         assert outcome.failure_reason == FailureReason.BLOCKED_TARGET.value
 
 
+class TestRetry:
+    """retry_attempts is 0 (off) by default; existing behaviour must not move."""
+
+    @respx.mock
+    async def test_off_by_default_does_not_retry_a_timeout(self):
+        route = respx.get("https://api.example.com/health").mock(
+            side_effect=httpx.ConnectTimeout("timed out")
+        )
+        outcome = await run_check(target())
+
+        assert outcome.status == CheckStatus.DOWN.value
+        assert outcome.retry_count == 0
+        assert route.call_count == 1
+
+    @respx.mock
+    async def test_a_transient_failure_is_retried_and_recorded(self):
+        route = respx.get("https://api.example.com/health").mock(
+            side_effect=[httpx.ConnectTimeout("timed out"), httpx.Response(200)]
+        )
+        outcome = await run_check(
+            target(retry_attempts=2, retry_delay_ms=0)
+        )
+
+        assert outcome.status == CheckStatus.UP.value
+        assert outcome.retry_count == 1
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_retries_are_exhausted_if_every_attempt_fails(self):
+        route = respx.get("https://api.example.com/health").mock(
+            side_effect=httpx.ConnectTimeout("timed out")
+        )
+        outcome = await run_check(
+            target(retry_attempts=2, retry_delay_ms=0)
+        )
+
+        assert outcome.status == CheckStatus.DOWN.value
+        assert outcome.retry_count == 2
+        assert route.call_count == 3
+
+    @respx.mock
+    async def test_an_http_status_mismatch_is_never_retried(self):
+        """A real failure of a path that exists must not be retried away."""
+        route = respx.get("https://api.example.com/health").mock(
+            return_value=httpx.Response(500)
+        )
+        outcome = await run_check(
+            target(retry_attempts=3, retry_delay_ms=0)
+        )
+
+        assert outcome.status == CheckStatus.DOWN.value
+        assert outcome.retry_count == 0
+        assert route.call_count == 1
+
+
 class TestDegraded:
     @respx.mock
     async def test_slow_but_successful_response_is_degraded(self):
@@ -341,6 +396,57 @@ class TestRedirects:
 
         assert outcome.status == CheckStatus.UP.value
         assert outcome.redirect_count == 0
+
+    @respx.mock
+    async def test_redirect_to_a_loopback_address_is_refused(self, monkeypatch):
+        """A public endpoint redirecting to an internal host must not be followed.
+
+        The original URL is fine and passes the up-front DNS/policy check;
+        the danger is a 3xx pointing somewhere that check never saw.
+        """
+
+        async def _resolve(hostname, port, *, timeout):
+            if hostname == "internal.example.com":
+                return "127.0.0.1", 0.1, None
+            return "10.20.30.40", 1.5, None
+
+        monkeypatch.setattr("app.monitoring.checker.resolve_host", _resolve)
+
+        respx.get("https://api.example.com/health").mock(
+            return_value=httpx.Response(
+                302,
+                headers={"Location": "https://internal.example.com/admin"},
+            )
+        )
+
+        outcome = await run_check(target(follow_redirects=True))
+
+        assert outcome.status == CheckStatus.DOWN.value
+        assert outcome.failure_reason == FailureReason.BLOCKED_TARGET.value
+        assert "internal.example.com" in outcome.error_message
+
+    @respx.mock
+    async def test_redirect_to_a_public_host_still_follows(self, monkeypatch):
+        """The guard must not break the ordinary, safe redirect case."""
+
+        async def _resolve(hostname, port, *, timeout):
+            return "10.20.30.40", 1.5, None
+
+        monkeypatch.setattr("app.monitoring.checker.resolve_host", _resolve)
+
+        respx.get("https://api.example.com/health").mock(
+            return_value=httpx.Response(
+                302, headers={"Location": "https://api.example.com/v2/health"}
+            )
+        )
+        respx.get("https://api.example.com/v2/health").mock(
+            return_value=httpx.Response(200)
+        )
+
+        outcome = await run_check(target(follow_redirects=True))
+
+        assert outcome.status == CheckStatus.UP.value
+        assert outcome.redirect_count == 1
 
 
 class TestRealDnsResolution:

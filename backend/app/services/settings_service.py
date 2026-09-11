@@ -179,6 +179,48 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         max_value=50,
     ),
     SettingSpec(
+        key="check_retry_attempts",
+        value_type="int",
+        default=0,
+        category="monitoring",
+        label="Check retry attempts",
+        description=(
+            "Off by default. When set, a check that fails on a transport-level "
+            "problem (timeout, connection refused, DNS) is retried this many "
+            "times before being recorded as a failure. An HTTP status or body "
+            "mismatch is never retried - that is a real failure, not a "
+            "transient one. A retried-but-recovered check is still recorded "
+            "with its retry count, so it stays visible to intermittent-failure "
+            "detection instead of looking like a clean pass."
+        ),
+        min_value=0,
+        max_value=5,
+    ),
+    SettingSpec(
+        key="check_retry_delay_ms",
+        value_type="int",
+        default=500,
+        category="monitoring",
+        label="Check retry delay (ms)",
+        description="Pause between a failed attempt and its retry.",
+        min_value=0,
+        max_value=10_000,
+    ),
+    SettingSpec(
+        key="intermittent_availability_threshold_pct",
+        value_type="float",
+        default=95.0,
+        category="monitoring",
+        label="Intermittent-failure availability threshold (%)",
+        description=(
+            "Diagnose reports 'intermittent failure' when the recent-checks "
+            "availability strip falls below this - a service that passes now "
+            "but fails often enough is not reliably healthy."
+        ),
+        min_value=50,
+        max_value=100,
+    ),
+    SettingSpec(
         key="recovery_checks_required",
         value_type="int",
         default=3,
