@@ -16,6 +16,7 @@ import clsx from 'clsx'
 
 import DiagnosticsPanel from '../components/DiagnosticsPanel'
 import EndpointForm from '../components/EndpointForm'
+import LiveIndicator from '../components/LiveIndicator'
 import {
   ChartFrame,
   LatencyBreakdownChart,
@@ -54,6 +55,7 @@ import {
   humanise,
 } from '../lib/format'
 import { useAuth } from '../hooks/useAuth'
+import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { useToast } from '../hooks/useToast'
 
 const WINDOW_LABELS = {
@@ -182,26 +184,69 @@ export default function EndpointDetail() {
     }
   }, [canWrite])
 
-  useEffect(() => {
-    if (tab !== 'history') return
-    endpointsApi
-      .history(endpointId, {
-        page: historyPage,
-        page_size: 50,
-        status: historyStatus || undefined,
-        include_headers: true,
-      })
-      .then(setHistory)
-      .catch((err) => toast.error(err.message))
-  }, [tab, endpointId, historyPage, historyStatus, toast])
+  // Tab data lives in named loaders rather than inline effects so a check, or
+  // a background poll, can re-read whatever is on screen instead of waiting
+  // for a dependency to happen to change.
+  const loadHistory = useCallback(
+    async ({ silent = false } = {}) => {
+      try {
+        setHistory(
+          await endpointsApi.history(endpointId, {
+            page: historyPage,
+            page_size: 50,
+            status: historyStatus || undefined,
+            include_headers: true,
+          }),
+        )
+      } catch (err) {
+        if (!silent) toast.error(err.message)
+      }
+    },
+    [endpointId, historyPage, historyStatus, toast],
+  )
+
+  const loadIncidents = useCallback(
+    async ({ silent = false } = {}) => {
+      try {
+        setIncidents(
+          await incidentsApi.list({
+            endpoint_id: endpointId,
+            page: 1,
+            page_size: 50,
+          }),
+        )
+      } catch (err) {
+        if (!silent) toast.error(err.message)
+      }
+    },
+    [endpointId, toast],
+  )
 
   useEffect(() => {
-    if (tab !== 'incidents') return
-    incidentsApi
-      .list({ endpoint_id: endpointId, page: 1, page_size: 50 })
-      .then(setIncidents)
-      .catch((err) => toast.error(err.message))
-  }, [tab, endpointId, toast])
+    if (tab === 'history') loadHistory()
+  }, [tab, loadHistory])
+
+  useEffect(() => {
+    if (tab === 'incidents') loadIncidents()
+  }, [tab, loadIncidents])
+
+  /** Everything on this screen that can change without the operator acting. */
+  const refreshLive = useCallback(async () => {
+    await Promise.all([
+      loadEndpoint(),
+      loadStats(),
+      loadCertificate(),
+      tab === 'history' ? loadHistory({ silent: true }) : null,
+      tab === 'incidents' ? loadIncidents({ silent: true }) : null,
+    ])
+  }, [loadEndpoint, loadStats, loadCertificate, loadHistory, loadIncidents, tab])
+
+  // Paused while a dialog is open or an action is in flight: replacing the
+  // endpoint underneath an open edit form or a diagnosis report would swap the
+  // data those were rendered from.
+  const { refreshing, lastRefreshedAt, refreshNow } = useAutoRefresh(refreshLive, {
+    paused: checking || diagnosing || formOpen || confirmDelete || diagnosticsOpen,
+  })
 
   // ------------------------------------------------------------- actions
   const runCheck = async () => {
@@ -222,8 +267,12 @@ export default function EndpointDetail() {
       else if (result.status === 'degraded') toast.warning(detail)
       else toast.error(`${detail}${result.error_message ? ` — ${result.error_message}` : ''}`)
 
-      await Promise.all([loadEndpoint(), loadStats(), loadCertificate()])
-      if (tab === 'history') setHistoryPage(1)
+      // A check writes a result row and can open or close an incident, so the
+      // open tab has to be re-read as well. This used to call setHistoryPage(1)
+      // to trigger that - but when the page was already 1 React bailed out of
+      // the state update, the effect never re-ran, and the new result only
+      // showed up after a manual page reload.
+      await refreshLive()
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -296,6 +345,12 @@ export default function EndpointDetail() {
         description={endpoint.url}
         actions={
           <>
+            <LiveIndicator
+              refreshing={refreshing}
+              lastRefreshedAt={lastRefreshedAt}
+              onRefresh={refreshNow}
+              showToggle
+            />
             {canCheck ? (
               <>
                 <button
@@ -1026,9 +1081,7 @@ export default function EndpointDetail() {
         onClose={() => setFormOpen(false)}
         onSaved={() => {
           setFormOpen(false)
-          loadEndpoint()
-          loadStats()
-          loadCertificate()
+          refreshLive()
         }}
       />
 

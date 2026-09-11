@@ -24,7 +24,9 @@ import clsx from 'clsx'
 
 import { Modal, Spinner } from './ui'
 import { formatDateTime, formatNumber, formatRelative } from '../lib/format'
+import { copyToClipboard } from '../lib/clipboard'
 import { useBranding } from '../hooks/useBranding'
+import { useToast } from '../hooks/useToast'
 
 /**
  * Diagnose: structured troubleshooting for one endpoint.
@@ -204,6 +206,7 @@ function Section({ title, icon: Icon, children, subtitle, defaultOpen = true }) 
 
 function CommandLine({ command, note, risk = 'safe' }) {
   const [copied, setCopied] = useState(false)
+  const toast = useToast()
   const style = RISK_STYLE[risk] || RISK_STYLE.safe
 
   return (
@@ -217,10 +220,14 @@ function CommandLine({ command, note, risk = 'safe' }) {
           className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
           title="Copy"
           aria-label={`Copy command: ${command}`}
-          onClick={() => {
-            navigator.clipboard?.writeText(command)
-            setCopied(true)
-            setTimeout(() => setCopied(false), 1500)
+          onClick={async () => {
+            const ok = await copyToClipboard(command)
+            if (ok) {
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            } else {
+              toast.error('Could not copy - select the command and copy it manually.')
+            }
           }}
         >
           {copied ? <ClipboardCheck size={14} /> : <Copy size={14} />}

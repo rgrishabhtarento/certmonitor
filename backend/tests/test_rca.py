@@ -278,6 +278,113 @@ class TestOwnership:
         )
         assert response.status_code == 403
 
+
+class TestAttachments:
+    """A link to wherever the document already lives - never a file we store."""
+
+    async def test_an_attachment_can_be_added(self, client, admin_headers, incident):
+        created = await client.post(
+            f"/api/incidents/{incident.id}/rca", json={}, headers=admin_headers
+        )
+        rca_id = created.json()["id"]
+
+        response = await client.put(
+            f"/api/rca/{rca_id}",
+            json={
+                "attachments": [
+                    {
+                        "label": "Postmortem doc",
+                        "url": "https://docs.google.com/document/d/abc123",
+                    }
+                ]
+            },
+            headers=admin_headers,
+        )
+
+        assert response.status_code == 200
+        attachments = response.json()["attachments"]
+        assert len(attachments) == 1
+        assert attachments[0]["label"] == "Postmortem doc"
+        assert attachments[0]["url"] == "https://docs.google.com/document/d/abc123"
+        assert attachments[0]["id"]
+        assert attachments[0]["added_by"] == "admin"
+
+    async def test_a_javascript_url_is_rejected(self, client, admin_headers, incident):
+        """The url is rendered as a clickable link - only http(s) is safe."""
+        created = await client.post(
+            f"/api/incidents/{incident.id}/rca", json={}, headers=admin_headers
+        )
+        response = await client.put(
+            f"/api/rca/{created.json()['id']}",
+            json={
+                "attachments": [
+                    {"label": "evil", "url": "javascript:alert(document.cookie)"}
+                ]
+            },
+            headers=admin_headers,
+        )
+        assert response.status_code == 422
+
+    async def test_an_existing_attachment_keeps_its_original_timestamp(
+        self, client, admin_headers, incident
+    ):
+        """Re-saving the RCA must not re-stamp an attachment as just-added."""
+        created = await client.post(
+            f"/api/incidents/{incident.id}/rca", json={}, headers=admin_headers
+        )
+        rca_id = created.json()["id"]
+
+        first = await client.put(
+            f"/api/rca/{rca_id}",
+            json={
+                "attachments": [
+                    {"label": "Doc", "url": "https://example.com/doc"}
+                ]
+            },
+            headers=admin_headers,
+        )
+        original = first.json()["attachments"][0]
+
+        second = await client.put(
+            f"/api/rca/{rca_id}",
+            json={
+                "root_cause": "Now with a root cause too",
+                "attachments": first.json()["attachments"],
+            },
+            headers=admin_headers,
+        )
+        again = second.json()["attachments"][0]
+
+        assert again["id"] == original["id"]
+        assert again["added_at"] == original["added_at"]
+
+    async def test_removing_an_attachment_is_just_omitting_it(
+        self, client, admin_headers, incident
+    ):
+        created = await client.post(
+            f"/api/incidents/{incident.id}/rca", json={}, headers=admin_headers
+        )
+        rca_id = created.json()["id"]
+        await client.put(
+            f"/api/rca/{rca_id}",
+            json={
+                "attachments": [
+                    {"label": "Keep", "url": "https://example.com/keep"},
+                    {"label": "Drop", "url": "https://example.com/drop"},
+                ]
+            },
+            headers=admin_headers,
+        )
+
+        response = await client.put(
+            f"/api/rca/{rca_id}",
+            json={"attachments": [{"label": "Keep", "url": "https://example.com/keep"}]},
+            headers=admin_headers,
+        )
+
+        labels = [a["label"] for a in response.json()["attachments"]]
+        assert labels == ["Keep"]
+
     async def test_team_matching_ignores_case_and_padding(
         self, client, admin_headers, team_headers, incident
     ):

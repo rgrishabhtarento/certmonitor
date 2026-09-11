@@ -549,6 +549,18 @@ async def update_rca(
             }
             for item in body["timeline"]
         ]
+    if "attachments" in body and body["attachments"] is not None:
+        body["attachments"] = [
+            {
+                **(item if isinstance(item, dict) else item.model_dump()),
+                "added_at": (
+                    (item.get("added_at") if isinstance(item, dict) else item.added_at).isoformat()
+                    if (item.get("added_at") if isinstance(item, dict) else item.added_at)
+                    else None
+                ),
+            }
+            for item in body["attachments"]
+        ]
 
     try:
         await rca_service.save(session, rca, body, user=user)

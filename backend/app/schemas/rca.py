@@ -26,6 +26,24 @@ class TimelineEntry(BaseModel):
     source: str = Field(default="manual", max_length=16)
 
 
+class Attachment(BaseModel):
+    """A link to wherever the actual document lives, not a file we store."""
+
+    id: str | None = None
+    label: str = Field(min_length=1, max_length=200)
+    url: str = Field(min_length=1, max_length=2048)
+    added_at: datetime | None = None
+    added_by: str | None = None
+
+    @field_validator("url")
+    @classmethod
+    def _http_or_https_only(cls, value: str) -> str:
+        value = value.strip()
+        if not (value.startswith("http://") or value.startswith("https://")):
+            raise ValueError("attachment url must start with http:// or https://")
+        return value
+
+
 class IncidentCommentRead(BaseModel):
     id: int
     username: str | None = None
@@ -67,6 +85,7 @@ class RcaRead(RcaListItem):
     resolution: str | None = None
     preventive_actions: list[PreventiveAction] = Field(default_factory=list)
     timeline: list[TimelineEntry] = Field(default_factory=list)
+    attachments: list[Attachment] = Field(default_factory=list)
     not_required_reason: str | None = None
     started_at: datetime | None = None
     completed_by: str | None = None
@@ -126,6 +145,7 @@ class RcaUpdate(BaseModel):
     resolution: str | None = None
     preventive_actions: list[PreventiveAction] | None = None
     timeline: list[TimelineEntry] | None = None
+    attachments: list[Attachment] | None = Field(default=None, max_length=20)
     due_at: datetime | None = None
 
     @field_validator("root_cause_category")
@@ -242,6 +262,7 @@ def to_read(
             PreventiveAction(**item) for item in (rca.preventive_actions or [])
         ],
         timeline=[TimelineEntry(**item) for item in (rca.timeline or [])],
+        attachments=[Attachment(**item) for item in (rca.attachments or [])],
         not_required_reason=rca.not_required_reason,
         started_at=rca.started_at,
         completed_by=rca.completed_by,

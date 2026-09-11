@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Download, RefreshCw, ShieldCheck } from 'lucide-react'
+import { Download, ShieldCheck } from 'lucide-react'
 
 import {
   Clamp,
@@ -11,10 +11,10 @@ import {
   Pagination,
   SearchInput,
   SortHeader,
-  Spinner,
   SslBadge,
   TagChip,
 } from '../components/ui'
+import LiveIndicator from '../components/LiveIndicator'
 import { endpointsApi, sslApi } from '../lib/api'
 import {
   formatDate,
@@ -23,6 +23,7 @@ import {
   formatNumber,
   formatRelative,
 } from '../lib/format'
+import { SLOW_INTERVAL, useAutoRefresh } from '../hooks/useAutoRefresh'
 import { useToast } from '../hooks/useToast'
 
 /** Counter chip in the header; doubles as a status filter. */
@@ -121,10 +122,16 @@ export default function SslCertificates() {
     setPage(1)
   }, [search, status, issuer, environment, tag, expiringWithin, pageSize])
 
-  const refresh = () => {
-    load({ silent: true })
-    sslApi.summary().then(setSummary).catch(() => {})
-  }
+  const refresh = useCallback(async () => {
+    await Promise.all([
+      load({ silent: true }),
+      sslApi.summary().then(setSummary).catch(() => {}),
+    ])
+  }, [load])
+
+  // Certificate state moves slowly, but the endpoint status beside it does
+  // not - an hourly SSL sweep or any check can change what this page shows.
+  const { lastRefreshedAt } = useAutoRefresh(refresh, { interval: SLOW_INTERVAL })
 
   const exportCsv = async () => {
     try {
@@ -150,15 +157,12 @@ export default function SslCertificates() {
         }
         actions={
           <>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={refresh}
-              disabled={refreshing}
-            >
-              {refreshing ? <Spinner size={15} /> : <RefreshCw size={15} />}
-              <span className="hidden sm:inline">Refresh</span>
-            </button>
+            <LiveIndicator
+              refreshing={refreshing}
+              lastRefreshedAt={lastRefreshedAt}
+              onRefresh={refresh}
+              showToggle
+            />
             <button type="button" className="btn-secondary" onClick={exportCsv}>
               <Download size={15} />
               <span className="hidden sm:inline">Export</span>

@@ -15,6 +15,7 @@ own an RCA. That is the whole permission model.
 
 from __future__ import annotations
 
+import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
@@ -279,6 +280,29 @@ async def save(
                 "source": str(item.get("source") or "manual")[:16],
             })
         rca.timeline = entries or None
+
+    if "attachments" in payload and payload["attachments"] is not None:
+        # A link to wherever the document already lives (Drive, OneDrive,
+        # SharePoint, an internal wiki) - never a file InfraSight stores
+        # itself. Whole-list-replace, same as preventive_actions/timeline
+        # above; an item that already has an id keeps its original
+        # added_at/added_by rather than being re-stamped on every save.
+        attachments = []
+        for item in (payload["attachments"] or [])[:20]:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url", "")).strip()
+            if not url.startswith(("http://", "https://")):
+                continue
+            label = str(item.get("label", "")).strip() or url
+            attachments.append({
+                "id": item.get("id") or uuid.uuid4().hex[:12],
+                "label": label[:200],
+                "url": url[:2048],
+                "added_at": item.get("added_at") or _now().isoformat(),
+                "added_by": item.get("added_by") or user.username,
+            })
+        rca.attachments = attachments or None
 
     if "due_at" in payload:
         rca.due_at = payload["due_at"]

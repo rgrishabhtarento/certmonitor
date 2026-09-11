@@ -4,8 +4,10 @@ import {
   ArrowLeft,
   CheckCircle2,
   ClipboardList,
+  ExternalLink,
   FileText,
   MessageSquare,
+  Paperclip,
   Plus,
   Save,
   UserCog,
@@ -54,6 +56,9 @@ export default function RcaDetail() {
   const [actions, setActions] = useState([])
   const [newAction, setNewAction] = useState('')
   const [timeline, setTimeline] = useState([])
+  const [attachments, setAttachments] = useState([])
+  const [newAttachment, setNewAttachment] = useState({ label: '', url: '' })
+  const [attachmentError, setAttachmentError] = useState(null)
   const [comment, setComment] = useState('')
 
   const [draftNotice, setDraftNotice] = useState(null)
@@ -78,6 +83,7 @@ export default function RcaDetail() {
     })
     setActions(payload.preventive_actions || [])
     setTimeline(payload.timeline || [])
+    setAttachments(payload.attachments || [])
     setDirty(false)
   }, [])
 
@@ -138,6 +144,7 @@ export default function RcaDetail() {
           root_cause_category: form.root_cause_category || null,
           preventive_actions: actions,
           timeline,
+          attachments,
         }),
       'RCA saved.',
     )
@@ -428,6 +435,117 @@ export default function RcaDetail() {
                 <button type="submit" className="btn-secondary" disabled={!newAction.trim()}>
                   <Plus size={15} /> Add
                 </button>
+              </form>
+            ) : null}
+          </Card>
+
+          {/* ----------------------------------------- attachments */}
+          <Card
+            title={
+              <span className="flex items-center gap-1.5">
+                <Paperclip size={15} /> Attachments ({attachments.length})
+              </span>
+            }
+          >
+            {attachments.length === 0 ? (
+              <p className="mb-3 text-sm text-slate-400">
+                No links yet. Point at wherever the actual document already
+                lives - Drive, OneDrive, SharePoint, a wiki page.
+              </p>
+            ) : (
+              <ul className="mb-3 space-y-1.5">
+                {attachments.map((attachment, index) => (
+                  <li
+                    key={attachment.id || index}
+                    className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 dark:border-slate-700"
+                  >
+                    <ExternalLink size={13} className="shrink-0 text-slate-400" />
+                    <a
+                      href={attachment.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="min-w-0 flex-1 truncate text-sm text-brand-600 hover:underline dark:text-brand-400"
+                      title={attachment.url}
+                    >
+                      {attachment.label || attachment.url}
+                    </a>
+                    {attachment.added_by ? (
+                      <span className="shrink-0 text-xs text-slate-400">
+                        {attachment.added_by}
+                      </span>
+                    ) : null}
+                    {!readOnly ? (
+                      <button
+                        type="button"
+                        className="shrink-0 text-slate-400 hover:text-red-600"
+                        aria-label={`Remove: ${attachment.label || attachment.url}`}
+                        onClick={() => {
+                          setAttachments((current) =>
+                            current.filter((_, i) => i !== index),
+                          )
+                          setDirty(true)
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {!readOnly ? (
+              <form
+                className="space-y-2"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const url = newAttachment.url.trim()
+                  if (!url) return
+                  if (!/^https?:\/\//i.test(url)) {
+                    setAttachmentError('Link must start with http:// or https://')
+                    return
+                  }
+                  setAttachments((current) => [
+                    ...current,
+                    { label: newAttachment.label.trim() || url, url },
+                  ])
+                  setNewAttachment({ label: '', url: '' })
+                  setAttachmentError(null)
+                  setDirty(true)
+                }}
+              >
+                <div className="flex gap-2">
+                  <input
+                    className="input flex-1"
+                    placeholder="Label (optional)"
+                    value={newAttachment.label}
+                    onChange={(event) => {
+                      setNewAttachment((current) => ({ ...current, label: event.target.value }))
+                      setAttachmentError(null)
+                    }}
+                    maxLength={200}
+                  />
+                  <input
+                    className="input flex-[2]"
+                    placeholder="https://drive.google.com/..."
+                    value={newAttachment.url}
+                    onChange={(event) => {
+                      setNewAttachment((current) => ({ ...current, url: event.target.value }))
+                      setAttachmentError(null)
+                    }}
+                    maxLength={2048}
+                  />
+                  <button
+                    type="submit"
+                    className="btn-secondary shrink-0"
+                    disabled={!newAttachment.url.trim()}
+                  >
+                    <Plus size={15} /> Add
+                  </button>
+                </div>
+                {attachmentError ? (
+                  <p className="text-xs text-red-600 dark:text-red-400">{attachmentError}</p>
+                ) : null}
               </form>
             ) : null}
           </Card>

@@ -166,6 +166,12 @@ export default function IncidentRcaPanel({ incidentId, canWrite, teams = [] }) {
                 {rca.preventive_actions.length}
               </p>
             ) : null}
+            {rca.attachments?.length ? (
+              <p>
+                <span className="font-medium">Attachments:</span>{' '}
+                {rca.attachments.length}
+              </p>
+            ) : null}
             <p className="text-xs text-slate-400">
               Completed {formatDateTime(rca.completed_at)} by {rca.completed_by}
             </p>

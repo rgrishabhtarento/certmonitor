@@ -89,6 +89,11 @@ class Rca(Base):
     # [{at, kind, detail, source}] - seeded from real events, then editable.
     timeline: Mapped[list | None] = mapped_column(JSONType)
 
+    # [{id, label, url, added_at, added_by}] - a link to wherever the actual
+    # document already lives (Drive, OneDrive, SharePoint, ...), not a file
+    # InfraSight stores itself.
+    attachments: Mapped[list | None] = mapped_column(JSONType)
+
     # What the diagnosis engine concluded at the time, kept so the RCA still
     # shows its evidence after the endpoint has long since recovered.
     diagnosis_id: Mapped[int | None] = mapped_column(BigIntType)

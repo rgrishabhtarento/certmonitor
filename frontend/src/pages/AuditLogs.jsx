@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { FileClock, RefreshCw } from 'lucide-react'
+import { FileClock } from 'lucide-react'
 
 import {
   EmptyState,
@@ -9,10 +9,11 @@ import {
   PageHeader,
   Pagination,
   SearchInput,
-  Spinner,
 } from '../components/ui'
+import LiveIndicator from '../components/LiveIndicator'
 import { settingsApi } from '../lib/api'
 import { formatDateTime, formatRelative, humanise } from '../lib/format'
+import { SLOW_INTERVAL, useAutoRefresh } from '../hooks/useAutoRefresh'
 
 const ACTION_TONE = (action) => {
   if (action.includes('deleted') || action.includes('failed')) {
@@ -75,6 +76,13 @@ export default function AuditLogs() {
     load()
   }, [load])
 
+  // Entries append as people act. Paused while an entry's detail is open, so
+  // the row behind the dialog cannot be replaced underneath it.
+  const { lastRefreshedAt } = useAutoRefresh(() => load({ silent: true }), {
+    interval: SLOW_INTERVAL,
+    paused: Boolean(selected),
+  })
+
   useEffect(() => {
     setPage(1)
   }, [search, action, status, since, pageSize])
@@ -91,15 +99,12 @@ export default function AuditLogs() {
             : 'Administrative action trail'
         }
         actions={
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => load({ silent: true })}
-            disabled={refreshing}
-          >
-            {refreshing ? <Spinner size={15} /> : <RefreshCw size={15} />}
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
+          <LiveIndicator
+            refreshing={refreshing}
+            lastRefreshedAt={lastRefreshedAt}
+            onRefresh={() => load({ silent: true })}
+            showToggle
+          />
         }
       />
 
