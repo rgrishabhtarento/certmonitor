@@ -25,48 +25,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * backend that is evidently already struggling.
  */
 
-const STORAGE_KEY = 'infrasight.live_updates'
-
 /** Conversation surfaces feel broken above ~10s; aggregates can be lazier. */
 export const LIVE_INTERVAL = 10000
 export const SLOW_INTERVAL = 30000
-
-/** Read the global preference. Live by default; the toggle is opt-out. */
-export function liveUpdatesEnabled() {
-  try {
-    return localStorage.getItem(STORAGE_KEY) !== 'off'
-  } catch {
-    return true
-  }
-}
-
-export function setLiveUpdatesEnabled(enabled) {
-  try {
-    localStorage.setItem(STORAGE_KEY, enabled ? 'on' : 'off')
-  } catch {
-    /* ignore */
-  }
-  // Same-tab listeners: `storage` only fires in *other* tabs, so components
-  // in this one would otherwise never notice the switch.
-  window.dispatchEvent(new CustomEvent('infrasight:live-updates'))
-}
-
-/** Subscribe to the global live-updates preference. */
-export function useLiveUpdates() {
-  const [enabled, setEnabled] = useState(liveUpdatesEnabled)
-
-  useEffect(() => {
-    const sync = () => setEnabled(liveUpdatesEnabled())
-    window.addEventListener('infrasight:live-updates', sync)
-    window.addEventListener('storage', sync)
-    return () => {
-      window.removeEventListener('infrasight:live-updates', sync)
-      window.removeEventListener('storage', sync)
-    }
-  }, [])
-
-  return [enabled, setLiveUpdatesEnabled]
-}
 
 /**
  * Poll `callback` on an interval.
@@ -74,17 +35,17 @@ export function useLiveUpdates() {
  * @param callback   async fetcher. Held in a ref, so an inline arrow does not
  *                   restart the timer on every render.
  * @param interval   milliseconds between ticks.
- * @param enabled    per-screen switch, ANDed with the global preference.
+ * @param enabled    per-screen switch.
  * @param paused     true while the user is mid-edit - skip this tick.
  *
- * Returns `{ refreshing, lastRefreshedAt, refreshNow }` so a screen can show
- * that something happened and offer a manual refresh with real feedback.
+ * Returns `{ refreshing, lastRefreshedAt, refreshNow }`. `refreshNow` exists
+ * for code that needs to force a read after an action; screens no longer
+ * offer it as a button, because the data keeps itself current.
  */
 export function useAutoRefresh(
   callback,
   { interval = LIVE_INTERVAL, enabled = true, paused = false } = {},
 ) {
-  const [globalEnabled] = useLiveUpdates()
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState(null)
 
@@ -120,7 +81,7 @@ export function useAutoRefresh(
     }
   }, [])
 
-  const active = enabled && globalEnabled
+  const active = enabled
 
   useEffect(() => {
     if (!active) return undefined

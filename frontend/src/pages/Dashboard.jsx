@@ -72,8 +72,11 @@ function StatTile({ icon: Icon, label, value, sub, tone = 'neutral', to }) {
     info: 'bg-brand-50 text-brand-600 dark:bg-brand-900/30 dark:text-brand-400',
   }
 
+  // h-full throughout: the grid stretches each cell to the tallest in its
+  // row, but without this the card inside sizes to its own content, so a
+  // tile with no sub-line ends up visibly shorter than its neighbours.
   const body = (
-    <div className="card flex items-center gap-3 p-3.5 transition-shadow hover:shadow-md">
+    <div className="card flex h-full items-center gap-3 p-3.5 transition-shadow hover:shadow-md">
       <span className={clsx('grid h-9 w-9 shrink-0 place-items-center rounded-lg', iconTones[tone])}>
         <Icon size={18} />
       </span>
@@ -92,7 +95,7 @@ function StatTile({ icon: Icon, label, value, sub, tone = 'neutral', to }) {
   )
 
   return to ? (
-    <Link to={to} className="block">
+    <Link to={to} className="block h-full">
       {body}
     </Link>
   ) : (
@@ -113,9 +116,6 @@ export default function Dashboard() {
   const [filters, setFilters] = useState({ environments: [], tags: [] })
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  // Bumped by the page-level refresh so the Smart Summary reloads alongside
-  // the charts, from one control rather than two.
-  const [refreshSignal, setRefreshSignal] = useState(0)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -160,7 +160,7 @@ export default function Dashboard() {
 
   // The charts are the heaviest queries on the page, so they refresh on the
   // slow cadence - the Smart Summary above them carries the urgent numbers.
-  const { lastRefreshedAt, refreshNow } = useAutoRefresh(
+  const { lastRefreshedAt } = useAutoRefresh(
     () => load({ silent: true, background: true }),
     { interval: SLOW_INTERVAL },
   )
@@ -227,15 +227,6 @@ export default function Dashboard() {
               lastRefreshedAt ||
               (data?.generated_at ? new Date(data.generated_at) : null)
             }
-            // The single refresh for this page: the charts, and the Smart
-            // Summary below, which reloads on the signal. Two buttons a few
-            // pixels apart only raised the question of which half each one
-            // was refreshing.
-            onRefresh={() => {
-              refreshNow()
-              setRefreshSignal((value) => value + 1)
-            }}
-            showToggle
           />
         }
       />
@@ -244,7 +235,7 @@ export default function Dashboard() {
           it answers "what needs my attention" - the question an operator
           opens this page with. Everything in it is a count of real rows on
           this server; nothing is sent anywhere. */}
-      <SmartSummary refreshSignal={refreshSignal} showControls={false} />
+      <SmartSummary showControls={false} />
       <InfraSearch />
 
       {/* One filter row above everything it scopes, so every chart below
@@ -360,7 +351,10 @@ export default function Dashboard() {
               The refresh button spins and the indicator says "Updating…" —
               that is enough, and it does not move the content. */}
           {/* ------------------------------------------------- KPI row */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {/* One grid, not two, and column counts that divide 10 exactly
+              (2 or 5). Two grids of 6 and 4 made the second row's tiles
+              wider than the first's, which read as an accident. */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
             <StatTile
               icon={ServerCog}
               label="Endpoints"
@@ -410,9 +404,6 @@ export default function Dashboard() {
                     : 'warn'
               }
             />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <StatTile
               icon={ShieldCheck}
               label="Certificates"

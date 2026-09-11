@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import uuid
 
 from sqlalchemy import func, select
 
@@ -418,3 +419,143 @@ class TestExport:
             headers=admin_headers,
         )
         assert audit.json()["meta"]["total"] == 1
+
+
+class TestSslExport:
+    """The certificate inventory, as its own report rather than the endpoint one."""
+
+    async def _certificate(self, session, client, admin_headers, **overrides):
+        from datetime import datetime, timedelta, timezone
+
+        from app.models.monitoring import SslCertificate
+
+        created = await client.post(
+            "/api/endpoints",
+            json={
+                "name": overrides.pop("name", "Payments API"),
+                "url": overrides.pop("url", "https://payments.example.com/health"),
+            },
+            headers=admin_headers,
+        )
+        endpoint_id = created.json()["id"]
+
+        expires = datetime.now(timezone.utc) + timedelta(days=45)
+        row = SslCertificate(
+            endpoint_id=uuid.UUID(endpoint_id),
+            common_name="payments.example.com",
+            issuer_common_name="R3",
+            issuer="Let's Encrypt",
+            valid_to=expires,
+            days_remaining=45,
+            status="valid",
+            is_current=True,
+            **overrides,
+        )
+        session.add(row)
+        await session.commit()
+        return row
+
+    async def test_the_workbook_has_exactly_the_requested_columns(
+        self, session, client, admin_headers
+    ):
+        await self._certificate(session, client, admin_headers)
+
+        response = await client.get("/api/ssl/export", headers=admin_headers)
+
+        assert response.status_code == 200
+        assert response.content[:2] == b"PK"  # xlsx files are ZIP archives
+        assert "attachment" in response.headers["content-disposition"]
+        assert ".xlsx" in response.headers["content-disposition"]
+
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(io.BytesIO(response.content))
+        sheet = workbook.active
+        headers = [cell.value for cell in sheet[1]]
+        assert headers == [
+            "S No.",
+            "Endpoint name",
+            "Endpoint URL",
+            "Certificate",
+            "Type",
+            "Expiry date",
+            "Days remaining",
+            "Last checked",
+        ]
+
+        assert sheet.cell(row=2, column=1).value == 1
+        assert sheet.cell(row=2, column=2).value == "Payments API"
+        assert sheet.cell(row=2, column=3).value == "https://payments.example.com/health"
+        assert sheet.cell(row=2, column=4).value == "payments.example.com"
+        assert sheet.cell(row=2, column=5).value == "R3"
+        workbook.close()
+
+    async def test_days_remaining_is_a_live_formula_not_a_frozen_number(
+        self, session, client, admin_headers
+    ):
+        """A number would be wrong the day after the file was generated."""
+        await self._certificate(session, client, admin_headers)
+
+        response = await client.get("/api/ssl/export", headers=admin_headers)
+
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(io.BytesIO(response.content))
+        sheet = workbook.active
+        formula = sheet.cell(row=2, column=7).value
+        assert isinstance(formula, str) and formula.startswith("=")
+        # Against the expiry cell in its own row, and against the clock.
+        assert "F2" in formula
+        assert "NOW()" in formula
+        workbook.close()
+
+    async def test_dates_are_real_datetimes_so_the_formula_can_use_them(
+        self, session, client, admin_headers
+    ):
+        from datetime import datetime
+
+        await self._certificate(session, client, admin_headers)
+
+        response = await client.get("/api/ssl/export", headers=admin_headers)
+
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(io.BytesIO(response.content))
+        sheet = workbook.active
+        expiry = sheet.cell(row=2, column=6)
+        checked = sheet.cell(row=2, column=8)
+        assert isinstance(expiry.value, datetime)
+        assert isinstance(checked.value, datetime)
+        # Excel cannot hold a timezone; the values are UTC and naive.
+        assert expiry.value.tzinfo is None
+        assert "hh:mm" in checked.number_format
+        workbook.close()
+
+    async def test_it_honours_the_page_filters(
+        self, session, client, admin_headers
+    ):
+        await self._certificate(session, client, admin_headers)
+        await self._certificate(
+            session,
+            client,
+            admin_headers,
+            name="Search API",
+            url="https://search.example.com/health",
+        )
+
+        response = await client.get(
+            "/api/ssl/export", params={"search": "Payments"}, headers=admin_headers
+        )
+
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(io.BytesIO(response.content))
+        sheet = workbook.active
+        names = [sheet.cell(row=r, column=2).value for r in range(2, sheet.max_row + 1)]
+        assert names == ["Payments API"]
+        workbook.close()
+
+    async def test_a_viewer_may_export(self, session, client, admin_headers, viewer_headers):
+        await self._certificate(session, client, admin_headers)
+        response = await client.get("/api/ssl/export", headers=viewer_headers)
+        assert response.status_code == 200

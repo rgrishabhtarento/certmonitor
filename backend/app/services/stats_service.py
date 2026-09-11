@@ -982,6 +982,23 @@ async def uptime_for_endpoints(
     return result
 
 
+async def endpoint_status_summary(session: AsyncSession) -> dict[str, int]:
+    """Counts per endpoint status, for the endpoints page header.
+
+    Grouped on ``current_status`` - the same column the page's status filter
+    queries - so a chip's number always matches the number of rows clicking
+    it produces.
+    """
+    rows = (
+        await session.execute(
+            select(Endpoint.current_status, func.count(Endpoint.id)).group_by(
+                Endpoint.current_status
+            )
+        )
+    ).all()
+    return {str(row[0]): int(row[1]) for row in rows}
+
+
 async def certificate_summary(session: AsyncSession) -> dict[str, int]:
     """Counts per certificate state, for the SSL dashboard header."""
     rows = (

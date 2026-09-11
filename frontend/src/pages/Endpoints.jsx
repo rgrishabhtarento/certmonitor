@@ -6,17 +6,18 @@ import {
   Pause,
   Play,
   Plus,
-  RefreshCw,
   ServerCog,
   Trash2,
   Zap,
 } from 'lucide-react'
 
 import EndpointForm from '../components/EndpointForm'
+import LiveIndicator from '../components/LiveIndicator'
 import {
   ActionMenu,
   Clamp,
   ConfirmDialog,
+  CountChip,
   EmptyState,
   ErrorState,
   LoadingBlock,
@@ -36,6 +37,7 @@ import {
   formatDaysRemaining,
   formatInterval,
   formatMs,
+  formatNumber,
   formatPercent,
   formatRelative,
 } from '../lib/format'
@@ -64,6 +66,7 @@ export default function Endpoints() {
   const [sortDir, setSortDir] = useState(searchParams.get('sort_dir') || 'asc')
 
   const [data, setData] = useState(null)
+  const [summary, setSummary] = useState(null)
   const [filters, setFilters] = useState({ environments: [], tags: [], owners: [] })
   const [config, setConfig] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -134,10 +137,26 @@ export default function Endpoints() {
     load()
   }, [load])
 
+  const loadSummary = useCallback(
+    () => endpointsApi.summary().then(setSummary).catch(() => {}),
+    [],
+  )
+
+  useEffect(() => {
+    loadSummary()
+  }, [loadSummary])
+
+  // The header counts are unfiltered on purpose: they are the whole fleet,
+  // and clicking one filters down to it.
+  const refreshAll = useCallback(
+    () => Promise.all([load({ silent: true }), loadSummary()]),
+    [load, loadSummary],
+  )
+
   // Status changes here are the whole point of the page. Paused while rows
   // are selected, so a bulk action is never applied to a list that moved
   // underneath the selection.
-  useAutoRefresh(() => load({ silent: true }), {
+  const { lastRefreshedAt } = useAutoRefresh(refreshAll, {
     interval: SLOW_INTERVAL,
     paused: selected.size > 0 || formOpen,
   })
@@ -230,6 +249,10 @@ export default function Endpoints() {
     setSortDir(direction)
   }
 
+  /** Clicking the active chip clears the filter rather than reapplying it. */
+  const toggleStatus = (value) =>
+    setStatus((current) => (current === value ? '' : value))
+
   const activeFilterCount = useMemo(
     () => [environment, tag, status, sslStatus, owner].filter(Boolean).length,
     [environment, tag, status, sslStatus, owner],
@@ -240,19 +263,18 @@ export default function Endpoints() {
       <PageHeader
         title="Endpoints"
         description={
-          data ? `${data.meta.total.toLocaleString()} configured` : 'Monitored endpoints'
+          summary
+            ? `${formatNumber(summary.total)} configured · ${formatNumber(
+                summary.total - summary.paused,
+              )} actively monitored`
+            : 'Monitored endpoints'
         }
         actions={
           <>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => load({ silent: true })}
-              disabled={refreshing}
-            >
-              {refreshing ? <Spinner size={15} /> : <RefreshCw size={15} />}
-              <span className="hidden sm:inline">Refresh</span>
-            </button>
+            <LiveIndicator
+              refreshing={refreshing}
+              lastRefreshedAt={lastRefreshedAt}
+            />
             {can('endpoint:export') ? (
               <Link to="/import-export" className="btn-secondary">
                 <Download size={15} />
@@ -274,6 +296,47 @@ export default function Endpoints() {
           </>
         }
       />
+
+      {/* --------------------------------------------- status counters */}
+      {summary ? (
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          <CountChip
+            label="Healthy"
+            value={summary.up}
+            tone="good"
+            active={status === 'up'}
+            onClick={() => toggleStatus('up')}
+          />
+          <CountChip
+            label="Degraded"
+            value={summary.degraded}
+            tone="warn"
+            active={status === 'degraded'}
+            onClick={() => toggleStatus('degraded')}
+          />
+          <CountChip
+            label="Down"
+            value={summary.down}
+            tone="bad"
+            active={status === 'down'}
+            onClick={() => toggleStatus('down')}
+          />
+          <CountChip
+            label="Paused"
+            value={summary.paused}
+            tone="neutral"
+            active={status === 'paused'}
+            onClick={() => toggleStatus('paused')}
+          />
+          <CountChip
+            label="Unknown"
+            value={summary.unknown}
+            tone="neutral"
+            active={status === 'unknown'}
+            onClick={() => toggleStatus('unknown')}
+          />
+        </div>
+      ) : null}
 
       {/* ------------------------------------------------- filter row */}
       <div className="card mb-4 p-3">

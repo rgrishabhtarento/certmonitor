@@ -6,18 +6,19 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, or_, select
 
 from app.api.deps import (
     DbSession,
+    ExportEndpoints,
     Pagination,
     ReadEndpoints,
     RuntimeConfig,
     parse_uuid_list,
     split_csv_param,
 )
-from app.core.enums import SslStatus
+from app.core.enums import AuditAction, SslStatus
 from app.models.endpoint import Endpoint
 from app.models.monitoring import SslCertificate
 from app.schemas.common import Page
@@ -34,7 +35,12 @@ from app.schemas.monitoring import (
     SslSummary,
     incident_to_schema,
 )
-from app.services import monitoring_service, stats_service
+from app.services import (
+    audit_service,
+    import_export_service,
+    monitoring_service,
+    stats_service,
+)
 from app.services.stats_service import DashboardFilters
 
 router = APIRouter(tags=["Dashboard"])
@@ -246,29 +252,21 @@ async def ssl_summary(
     )
 
 
-@router.get(
-    "/ssl",
-    response_model=Page[SslDashboardRow],
-    summary="SSL certificate table with sorting and filtering",
-)
-async def list_certificates(
-    session: DbSession,
-    _user: ReadEndpoints,
-    page: Pagination,
-    search: Annotated[str | None, Query()] = None,
-    cert_status: Annotated[list[str] | None, Query(alias="status")] = None,
-    issuer: Annotated[list[str] | None, Query()] = None,
-    environment: Annotated[list[str] | None, Query()] = None,
-    tag: Annotated[list[str] | None, Query()] = None,
-    expiring_within_days: Annotated[int | None, Query(ge=0, le=3650)] = None,
-    self_signed: Annotated[bool | None, Query()] = None,
-    sort_by: Annotated[str, Query()] = "remaining",
-    sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
-) -> Page[SslDashboardRow]:
-    """The dedicated SSL monitoring page.
+def _ssl_filtered_query(
+    *,
+    search: str | None,
+    cert_status: list[str] | None,
+    issuer: list[str] | None,
+    environment: list[str] | None,
+    tag: list[str] | None,
+    expiring_within_days: int | None,
+    self_signed: bool | None,
+):
+    """The current certificate of every endpoint, filtered.
 
-    Joins the current certificate observation to its endpoint so a single
-    query can sort by expiry while still filtering on environment and tags.
+    Shared by the SSL page and its export so a downloaded file contains
+    exactly the rows the operator was looking at, rather than a different
+    set assembled by a second, drifting copy of these filters.
     """
     from app.models.endpoint import endpoint_tags
 
@@ -326,6 +324,43 @@ async def list_certificates(
     if self_signed is not None:
         stmt = stmt.where(SslCertificate.is_self_signed.is_(self_signed))
 
+    return stmt
+
+
+@router.get(
+    "/ssl",
+    response_model=Page[SslDashboardRow],
+    summary="SSL certificate table with sorting and filtering",
+)
+async def list_certificates(
+    session: DbSession,
+    _user: ReadEndpoints,
+    page: Pagination,
+    search: Annotated[str | None, Query()] = None,
+    cert_status: Annotated[list[str] | None, Query(alias="status")] = None,
+    issuer: Annotated[list[str] | None, Query()] = None,
+    environment: Annotated[list[str] | None, Query()] = None,
+    tag: Annotated[list[str] | None, Query()] = None,
+    expiring_within_days: Annotated[int | None, Query(ge=0, le=3650)] = None,
+    self_signed: Annotated[bool | None, Query()] = None,
+    sort_by: Annotated[str, Query()] = "remaining",
+    sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
+) -> Page[SslDashboardRow]:
+    """The dedicated SSL monitoring page.
+
+    Joins the current certificate observation to its endpoint so a single
+    query can sort by expiry while still filtering on environment and tags.
+    """
+    stmt = _ssl_filtered_query(
+        search=search,
+        cert_status=cert_status,
+        issuer=issuer,
+        environment=environment,
+        tag=tag,
+        expiring_within_days=expiring_within_days,
+        self_signed=self_signed,
+    )
+
     count_stmt = stmt.with_only_columns(func.count(SslCertificate.id)).order_by(None)
     total = int((await session.execute(count_stmt)).scalar() or 0)
 
@@ -368,6 +403,72 @@ async def list_certificates(
         for certificate, endpoint in rows
     ]
     return Page.build(items, total=total, page=page.page, page_size=page.page_size)
+
+
+@router.get(
+    "/ssl/export",
+    summary="Export the certificate inventory as a spreadsheet",
+    response_class=Response,
+)
+async def export_certificates(
+    user: ExportEndpoints,
+    request: Request,
+    session: DbSession,
+    search: Annotated[str | None, Query()] = None,
+    cert_status: Annotated[list[str] | None, Query(alias="status")] = None,
+    issuer: Annotated[list[str] | None, Query()] = None,
+    environment: Annotated[list[str] | None, Query()] = None,
+    tag: Annotated[list[str] | None, Query()] = None,
+    expiring_within_days: Annotated[int | None, Query(ge=0, le=3650)] = None,
+    self_signed: Annotated[bool | None, Query()] = None,
+    sort_by: Annotated[str, Query()] = "remaining",
+    sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
+) -> Response:
+    """Honours the page's current filters and sort, without its pagination.
+
+    Exporting page 2 of what is on screen would be a surprise; the whole
+    filtered set is what an operator means by "export this".
+    """
+    stmt = _ssl_filtered_query(
+        search=search,
+        cert_status=cert_status,
+        issuer=issuer,
+        environment=environment,
+        tag=tag,
+        expiring_within_days=expiring_within_days,
+        self_signed=self_signed,
+    )
+
+    column = _SSL_SORT_COLUMNS.get(sort_by.lower(), SslCertificate.days_remaining)
+    ordering = column.desc() if sort_dir == "desc" else column.asc()
+    rows = (
+        await session.execute(stmt.order_by(ordering.nulls_last(), Endpoint.name.asc()))
+    ).all()
+
+    content = import_export_service.export_ssl_excel(rows)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+    await audit_service.record(
+        session,
+        action=AuditAction.ENDPOINTS_EXPORTED.value,
+        user=user,
+        resource_type="ssl_certificate",
+        details={"format": "xlsx", "rows": len(rows)},
+        request=request,
+    )
+    await session.commit()
+
+    return Response(
+        content=content,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="infrasight-ssl-certificates-{timestamp}.xlsx"'
+            )
+        },
+    )
 
 
 @router.get(

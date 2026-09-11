@@ -804,6 +804,92 @@ def export_excel(endpoints: Sequence[Endpoint]) -> bytes:
     return stream.getvalue()
 
 
+# ------------------------------------------------------- SSL certificates
+SSL_EXPORT_COLUMNS = [
+    "S No.",
+    "Endpoint name",
+    "Endpoint URL",
+    "Certificate",
+    "Type",
+    "Expiry date",
+    "Days remaining",
+    "Last checked",
+]
+
+
+def _excel_datetime(value: datetime | None) -> datetime | None:
+    """Excel has no concept of a timezone, and openpyxl refuses aware values.
+
+    Everything is stored as UTC, so normalise to UTC and drop the tzinfo
+    rather than letting the write fail on an aware datetime.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def export_ssl_excel(rows: Sequence[tuple[Any, Any]]) -> bytes:
+    """Certificate inventory as a spreadsheet.
+
+    ``rows`` is ``(certificate, endpoint)`` pairs, as the SSL page's own query
+    returns them.
+
+    Dates are written as real Excel datetimes rather than strings, which is
+    what lets "Days remaining" be a live formula against the expiry cell: the
+    figure recalculates whenever the sheet is opened instead of freezing at
+    whatever it was the moment the file was generated. TRUNC, not INT, so it
+    rounds toward zero for an already-expired certificate - matching how the
+    application itself counts days.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "SSL certificates"
+
+    sheet.append(SSL_EXPORT_COLUMNS)
+    header_fill = PatternFill("solid", fgColor="1F2937")
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = header_fill
+        cell.alignment = Alignment(vertical="center")
+    sheet.freeze_panes = "A2"
+
+    for index, (certificate, endpoint) in enumerate(rows, start=1):
+        excel_row = index + 1  # row 1 is the header
+        sheet.append([
+            index,
+            endpoint.name,
+            endpoint.url,
+            certificate.common_name or "",
+            certificate.issuer_common_name or certificate.issuer or "",
+            _excel_datetime(certificate.valid_to),
+            # Live, so the sheet stays honest after it is mailed around.
+            f'=IF(F{excel_row}="","",TRUNC(F{excel_row}-NOW()))',
+            _excel_datetime(certificate.checked_at),
+        ])
+        sheet.cell(row=excel_row, column=6).number_format = "dd-mmm-yyyy"
+        sheet.cell(row=excel_row, column=7).number_format = "0"
+        sheet.cell(row=excel_row, column=8).number_format = "dd-mmm-yyyy hh:mm"
+
+    widths = [7, 34, 52, 32, 28, 14, 15, 20]
+    for column_index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(column_index)].width = width
+
+    sheet.auto_filter.ref = (
+        f"A1:{get_column_letter(len(SSL_EXPORT_COLUMNS))}{max(sheet.max_row, 1)}"
+    )
+
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+    return stream.getvalue()
+
+
 def csv_template() -> bytes:
     """A ready-to-fill template with one example row."""
     buffer = io.StringIO(newline="")

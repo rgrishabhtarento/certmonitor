@@ -245,6 +245,7 @@ export const endpointsApi = {
   list: (params) =>
     api.get('/endpoints', { params: cleanParams(params) }).then((r) => r.data),
   filters: () => api.get('/endpoints/filters').then((r) => r.data),
+  summary: () => api.get('/endpoints/summary').then((r) => r.data),
   get: (id) => api.get(`/endpoints/${id}`).then((r) => r.data),
   create: (payload) => api.post('/endpoints', payload).then((r) => r.data),
   update: (id, payload) => api.put(`/endpoints/${id}`, payload).then((r) => r.data),
@@ -295,6 +296,12 @@ export const sslApi = {
   list: (params) => api.get('/ssl', { params: cleanParams(params) }).then((r) => r.data),
   summary: () => api.get('/ssl/summary').then((r) => r.data),
   issuers: () => api.get('/ssl/issuers').then((r) => r.data),
+  // Same filters as `list`, minus pagination: the export is the whole
+  // filtered set, not the page currently on screen.
+  exportXlsx: (params, filename) =>
+    api
+      .get('/ssl/export', { params: cleanParams(params), responseType: 'blob' })
+      .then((r) => saveBlob(r.data, filename)),
 }
 
 export const incidentsApi = {
@@ -474,9 +481,9 @@ export const importExportApi = {
  * Download a file through axios so the Authorization header is sent.
  * A plain <a href> would omit the bearer token and get a 401.
  */
-export async function downloadFile(url, filename) {
-  const response = await api.get(url.replace(/^\/api/, ''), { responseType: 'blob' })
-  const blobUrl = URL.createObjectURL(response.data)
+/** Hand a blob response to the browser as a download. */
+export function saveBlob(blob, filename) {
+  const blobUrl = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = blobUrl
   link.download = filename
@@ -484,6 +491,11 @@ export async function downloadFile(url, filename) {
   link.click()
   link.remove()
   URL.revokeObjectURL(blobUrl)
+}
+
+export async function downloadFile(url, filename) {
+  const response = await api.get(url.replace(/^\/api/, ''), { responseType: 'blob' })
+  saveBlob(response.data, filename)
 }
 
 export const healthApi = {

@@ -239,11 +239,13 @@ export default function UsersPage() {
         }
       />
 
-      {/* Role reference so an admin can see what a role actually grants. */}
+      {/* Role reference so an admin can see what a role actually grants.
+          Three built-in roles, so three columns - at two they wrapped, and a
+          lone Viewer card on its own row read as a layout bug. */}
       {roles.length ? (
-        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+        <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {roles.map((role) => (
-            <div key={role.id} className="card p-3">
+            <div key={role.id} className="card h-full p-3">
               <div className="flex items-center gap-2">
                 <ShieldCheck size={16} className="text-brand-600 dark:text-brand-400" />
                 <p className="font-medium capitalize">{role.name}</p>

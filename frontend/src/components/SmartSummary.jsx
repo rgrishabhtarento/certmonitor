@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
@@ -64,13 +64,11 @@ function Tile({ icon: Icon, label, value, tone, to }) {
 }
 
 /**
- * @param refreshSignal  Bump to reload. Lets the page that hosts this own a
- *                       single refresh control rather than putting a second
- *                       one here - two refresh buttons a few pixels apart
- *                       raise the question of which half each one refreshes.
- * @param showControls   False when the host renders its own indicator.
+ * @param showControls   False when the host already shows its own "updated"
+ *                       stamp, so this panel does not repeat it a few pixels
+ *                       away. The panel polls itself either way.
  */
-export default function SmartSummary({ refreshSignal = 0, showControls = true }) {
+export default function SmartSummary({ showControls = true }) {
   const [summary, setSummary] = useState(null)
   const [daily, setDaily] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -97,7 +95,7 @@ export default function SmartSummary({ refreshSignal = 0, showControls = true })
 
   // The heavier of the two aggregate queries, so this polls on the slow
   // cadence rather than the conversational one.
-  const { refreshing, lastRefreshedAt, refreshNow } = useAutoRefresh(
+  const { refreshing, lastRefreshedAt } = useAutoRefresh(
     () => load({ silent: true }),
     { interval: SLOW_INTERVAL },
   )
@@ -105,18 +103,6 @@ export default function SmartSummary({ refreshSignal = 0, showControls = true })
   useEffect(() => {
     load().catch(() => {})
   }, [load])
-
-  // The host's refresh control reaches this panel through a counter, so one
-  // button refreshes the whole page. Skipped on mount - the effect above
-  // already did the first load.
-  const mounted = useRef(false)
-  useEffect(() => {
-    if (!mounted.current) {
-      mounted.current = true
-      return
-    }
-    load({ silent: true }).catch(() => {})
-  }, [refreshSignal, load])
 
   if (loading && !summary) {
     return (
@@ -151,8 +137,6 @@ export default function SmartSummary({ refreshSignal = 0, showControls = true })
             className="ml-auto"
             refreshing={refreshing}
             lastRefreshedAt={lastRefreshedAt || generatedAt}
-            onRefresh={refreshNow}
-            showToggle
           />
         ) : null}
       </div>

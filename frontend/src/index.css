@@ -134,6 +134,20 @@
     @apply overflow-x-auto;
   }
 
+  /* A table sitting flush against a card's edge: the header row is tinted and
+     the hovered last row is filled, and both are square - so without a
+     matching radius here they paint over the card's rounded corners. The
+     wrapper is already a scroll container, so a border-radius on it clips
+     them. Deliberately not `overflow-hidden` on `.card` itself: cards also
+     host dropdown menus, which must stay free to overflow. */
+  .card > .table-wrap:first-child {
+    @apply rounded-t-xl;
+  }
+
+  .card > .table-wrap:last-child {
+    @apply rounded-b-xl;
+  }
+
   .table {
     @apply w-full min-w-full border-collapse text-sm;
   }

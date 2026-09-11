@@ -102,8 +102,6 @@ export default function AuditLogs() {
           <LiveIndicator
             refreshing={refreshing}
             lastRefreshedAt={lastRefreshedAt}
-            onRefresh={() => load({ silent: true })}
-            showToggle
           />
         }
       />

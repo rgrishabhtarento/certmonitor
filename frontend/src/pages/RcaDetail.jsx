@@ -100,7 +100,7 @@ export default function RcaDetail() {
   // Losing a half-written root cause to a background poll would be far worse
   // than not seeing a new comment for a minute, so `dirty` hard-stops it -
   // and the manual Refresh stays available for when the user is ready.
-  const { refreshing, lastRefreshedAt, refreshNow } = useAutoRefresh(load, {
+  const { refreshing, lastRefreshedAt } = useAutoRefresh(load, {
     paused: dirty || busy || assignOpen || confirmComplete,
   })
 
@@ -189,8 +189,6 @@ export default function RcaDetail() {
             <LiveIndicator
               refreshing={refreshing}
               lastRefreshedAt={lastRefreshedAt}
-              onRefresh={refreshNow}
-              showToggle
             />
             {rca.can_assign ? (
               <button

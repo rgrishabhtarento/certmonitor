@@ -157,7 +157,7 @@ export default function SystemResources() {
     }
   }, [])
 
-  const { refreshing, lastRefreshedAt, refreshNow } = useAutoRefresh(load, {
+  const { refreshing, lastRefreshedAt } = useAutoRefresh(load, {
     interval: LIVE_INTERVAL,
   })
 
@@ -194,8 +194,6 @@ export default function SystemResources() {
           <LiveIndicator
             refreshing={refreshing}
             lastRefreshedAt={lastRefreshedAt}
-            onRefresh={refreshNow}
-            showToggle
           />
         }
       />

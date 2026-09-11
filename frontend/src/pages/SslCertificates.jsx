@@ -4,6 +4,7 @@ import { Download, ShieldCheck } from 'lucide-react'
 
 import {
   Clamp,
+  CountChip,
   EmptyState,
   ErrorState,
   LoadingBlock,
@@ -11,6 +12,7 @@ import {
   Pagination,
   SearchInput,
   SortHeader,
+  Spinner,
   SslBadge,
   TagChip,
 } from '../components/ui'
@@ -25,30 +27,6 @@ import {
 } from '../lib/format'
 import { SLOW_INTERVAL, useAutoRefresh } from '../hooks/useAutoRefresh'
 import { useToast } from '../hooks/useToast'
-
-/** Counter chip in the header; doubles as a status filter. */
-function CountChip({ label, value, tone, active, onClick }) {
-  const tones = {
-    good: 'border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950/50 dark:text-green-300',
-    warn: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300',
-    bad: 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300',
-    neutral:
-      'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300',
-  }
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`rounded-lg border px-3 py-2 text-left transition-shadow hover:shadow-sm ${tones[tone]} ${
-        active ? 'ring-2 ring-brand-500' : ''
-      }`}
-    >
-      <span className="block text-lg font-semibold leading-tight">{formatNumber(value)}</span>
-      <span className="block text-[11px] font-medium">{label}</span>
-    </button>
-  )
-}
 
 export default function SslCertificates() {
   const toast = useToast()
@@ -71,6 +49,7 @@ export default function SslCertificates() {
   const [filters, setFilters] = useState({ environments: [], tags: [] })
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -133,12 +112,29 @@ export default function SslCertificates() {
   // not - an hourly SSL sweep or any check can change what this page shows.
   const { lastRefreshedAt } = useAutoRefresh(refresh, { interval: SLOW_INTERVAL })
 
-  const exportCsv = async () => {
+  // This used to download the endpoint inventory as CSV, which is a different
+  // report entirely. It now exports the certificates actually on screen.
+  const exportXlsx = async () => {
+    setExporting(true)
     try {
-      const { downloadFile } = await import('../lib/api')
-      await downloadFile('/api/export?format=csv', 'infrasight-endpoints.csv')
+      const stamp = new Date().toISOString().slice(0, 10)
+      await sslApi.exportXlsx(
+        {
+          search,
+          status: status || undefined,
+          issuer: issuer || undefined,
+          environment: environment || undefined,
+          tag: tag || undefined,
+          expiring_within_days: expiringWithin || undefined,
+          sort_by: sortBy,
+          sort_dir: sortDir,
+        },
+        `infrasight-ssl-certificates-${stamp}.xlsx`,
+      )
     } catch (err) {
       toast.error(err.message)
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -160,11 +156,15 @@ export default function SslCertificates() {
             <LiveIndicator
               refreshing={refreshing}
               lastRefreshedAt={lastRefreshedAt}
-              onRefresh={refresh}
-              showToggle
             />
-            <button type="button" className="btn-secondary" onClick={exportCsv}>
-              <Download size={15} />
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={exportXlsx}
+              disabled={exporting}
+              title="Download the filtered certificates as an Excel file"
+            >
+              {exporting ? <Spinner size={15} /> : <Download size={15} />}
               <span className="hidden sm:inline">Export</span>
             </button>
           </>
@@ -219,7 +219,10 @@ export default function SslCertificates() {
       ) : null}
 
       <div className="card mb-4 p-3">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {/* Search spans two of six columns, leaving one each for the four
+            selects - so the whole filter set is one row rather than the tag
+            select dangling on a line of its own. */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <div className="lg:col-span-2">
             <SearchInput
               value={search}
@@ -266,10 +269,8 @@ export default function SslCertificates() {
             <option value="60">Within 60 days</option>
             <option value="90">Within 90 days</option>
           </select>
-        </div>
-        <div className="mt-3">
           <select
-            className="input w-auto"
+            className="input"
             value={tag}
             onChange={(event) => setTag(event.target.value)}
             aria-label="Filter by tag"

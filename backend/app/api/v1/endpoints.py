@@ -35,6 +35,7 @@ from app.schemas.endpoint import (
     EndpointFilterOptions,
     EndpointListItem,
     EndpointRead,
+    EndpointStatusSummary,
     EndpointStatusUpdate,
     EndpointUpdate,
     EnvironmentRead,
@@ -226,6 +227,26 @@ async def filter_options(
         teams=await endpoint_service.distinct_values(session, "team"),
         applications=await endpoint_service.distinct_values(session, "application"),
         allowed_intervals=list(config.get("allowed_intervals", [])),
+    )
+
+
+@router.get(
+    "/summary",
+    response_model=EndpointStatusSummary,
+    summary="Endpoint status counts",
+)
+async def endpoint_summary(
+    session: DbSession, _user: ReadEndpoints
+) -> EndpointStatusSummary:
+    """Counts for the header chips, which double as status filters."""
+    counts = await stats_service.endpoint_status_summary(session)
+    return EndpointStatusSummary(
+        total=sum(counts.values()),
+        up=counts.get(EndpointStatus.UP.value, 0),
+        degraded=counts.get(EndpointStatus.DEGRADED.value, 0),
+        down=counts.get(EndpointStatus.DOWN.value, 0),
+        paused=counts.get(EndpointStatus.PAUSED.value, 0),
+        unknown=counts.get(EndpointStatus.UNKNOWN.value, 0),
     )
 
 

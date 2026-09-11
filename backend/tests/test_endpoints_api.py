@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from sqlalchemy import select
 
@@ -329,6 +331,55 @@ class TestListAndFilter:
         body = response.json()
         assert any(e["name"] == "production" for e in body["environments"])
         assert 30 in body["allowed_intervals"]
+
+
+class TestStatusSummary:
+    """The header chips. Each count must match the rows its filter returns."""
+
+    async def test_a_new_endpoint_counts_as_unknown(self, client, admin_headers):
+        await client.post("/api/endpoints", json=BASE, headers=admin_headers)
+
+        response = await client.get("/api/endpoints/summary", headers=admin_headers)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 1
+        # Nothing has checked it yet, so it is not healthy - it is unknown.
+        assert body["unknown"] == 1
+        assert body["up"] == 0
+        assert body["down"] == 0
+
+    async def test_the_route_is_not_swallowed_by_the_id_route(
+        self, client, admin_headers
+    ):
+        """'/summary' must be declared before '/{endpoint_id}'."""
+        response = await client.get("/api/endpoints/summary", headers=admin_headers)
+        assert response.status_code == 200
+        assert "total" in response.json()
+
+    async def test_each_count_matches_its_filtered_list(
+        self, session, client, admin_headers
+    ):
+        for index, state in enumerate(("up", "up", "down", "paused")):
+            created = await client.post(
+                "/api/endpoints",
+                json={**BASE, "name": f"E{index}", "url": f"https://e{index}.test/h"},
+                headers=admin_headers,
+            )
+            row = await session.get(Endpoint, uuid.UUID(created.json()["id"]))
+            row.current_status = state
+        await session.commit()
+
+        summary = (
+            await client.get("/api/endpoints/summary", headers=admin_headers)
+        ).json()
+        assert (summary["up"], summary["down"], summary["paused"]) == (2, 1, 1)
+
+        for state, expected in (("up", 2), ("down", 1), ("paused", 1)):
+            listed = await client.get(
+                "/api/endpoints", params={"status": state}, headers=admin_headers
+            )
+            assert listed.json()["meta"]["total"] == expected, state
 
 
 class TestUpdateAndDelete:

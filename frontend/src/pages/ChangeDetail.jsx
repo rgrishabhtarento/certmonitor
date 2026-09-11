@@ -77,7 +77,7 @@ export default function ChangeDetail() {
   // record underneath an open Reject or Complete dialog would swap the
   // permissions those buttons were rendered from, and the comment draft is
   // separate state so it survives a refresh untouched.
-  const { refreshing, lastRefreshedAt, refreshNow } = useAutoRefresh(load, {
+  const { refreshing, lastRefreshedAt } = useAutoRefresh(load, {
     paused:
       busy || formOpen || rejectOpen || completeOpen || failOpen ||
       confirmStart || confirmCancel,
@@ -148,8 +148,6 @@ export default function ChangeDetail() {
             <LiveIndicator
               refreshing={refreshing}
               lastRefreshedAt={lastRefreshedAt}
-              onRefresh={refreshNow}
-              showToggle
             />
             {change.can_edit ? (
               <button

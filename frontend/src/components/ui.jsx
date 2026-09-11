@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import {
   SSL_STATUS_LABELS,
   STATUS_LABELS,
+  formatNumber,
   humanise,
   tagColor,
 } from '../lib/format'
@@ -593,6 +594,40 @@ export function SortHeader({ label, field, sortBy, sortDir, onSort, align = 'lef
         </span>
       </button>
     </th>
+  )
+}
+
+/**
+ * A counter in a page header that doubles as a filter.
+ *
+ * Shared by the SSL and endpoint pages so the two headers stay identical -
+ * the count and the filter it applies are the same control, which is what
+ * makes the number trustworthy: clicking it shows exactly those rows.
+ */
+export function CountChip({ label, value, tone, active, onClick }) {
+  const tones = {
+    good: 'border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950/50 dark:text-green-300',
+    warn: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300',
+    bad: 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300',
+    neutral:
+      'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300',
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={clsx(
+        'rounded-lg border px-3 py-2 text-left transition-shadow hover:shadow-sm',
+        tones[tone] || tones.neutral,
+        active && 'ring-2 ring-brand-500',
+      )}
+    >
+      <span className="block text-lg font-semibold leading-tight">
+        {formatNumber(value)}
+      </span>
+      <span className="block text-[11px] font-medium">{label}</span>
+    </button>
   )
 }
 

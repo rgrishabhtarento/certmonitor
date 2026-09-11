@@ -244,7 +244,7 @@ export default function EndpointDetail() {
   // Paused while a dialog is open or an action is in flight: replacing the
   // endpoint underneath an open edit form or a diagnosis report would swap the
   // data those were rendered from.
-  const { refreshing, lastRefreshedAt, refreshNow } = useAutoRefresh(refreshLive, {
+  const { refreshing, lastRefreshedAt } = useAutoRefresh(refreshLive, {
     paused: checking || diagnosing || formOpen || confirmDelete || diagnosticsOpen,
   })
 
@@ -348,8 +348,6 @@ export default function EndpointDetail() {
             <LiveIndicator
               refreshing={refreshing}
               lastRefreshedAt={lastRefreshedAt}
-              onRefresh={refreshNow}
-              showToggle
             />
             {canCheck ? (
               <>

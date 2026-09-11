@@ -473,6 +473,21 @@ class BulkEndpointAction(BaseModel):
         return self
 
 
+class EndpointStatusSummary(BaseModel):
+    """Status counts for the endpoints page header.
+
+    Counted on ``current_status``, the same column the page's status filter
+    queries, so each figure matches the rows clicking it produces.
+    """
+
+    total: int = 0
+    up: int = 0
+    degraded: int = 0
+    down: int = 0
+    paused: int = 0
+    unknown: int = 0
+
+
 class EndpointFilterOptions(BaseModel):
     """Everything the filter bar needs, in one request."""
 
